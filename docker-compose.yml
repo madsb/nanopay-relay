@@ -1,0 +1,15 @@
+services:
+  postgres:
+    image: postgis/postgis:16-3.4
+    restart: unless-stopped
+    ports:
+      - "5437:5432"
+    environment:
+      POSTGRES_USER: nanopay
+      POSTGRES_PASSWORD: nanopay
+      POSTGRES_DB: nanopay_relay
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+
+volumes:
+  pg_data:

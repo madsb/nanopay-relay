@@ -1,0 +1,17 @@
+node_modules/
+.pnpm/
+.env
+.DS_Store
+
+# build output
+**/dist/
+**/.turbo/
+
+# logs
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# test artifacts
+coverage/

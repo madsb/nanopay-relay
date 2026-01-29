@@ -1,0 +1,20 @@
+export const LIMITS = {
+  bodyMaxBytes: 300 * 1024,
+  requestPayloadMaxBytes: 64 * 1024,
+  resultPayloadMaxBytes: 256 * 1024,
+  errorPayloadMaxBytes: 8 * 1024,
+  titleMax: 120,
+  descriptionMax: 2000,
+  tagsMax: 16,
+  tagMax: 32,
+  priceMax: 40,
+  invoiceMax: 128,
+  paymentHashMax: 128,
+  authSkewSeconds: 60,
+  nonceTtlMs: 10 * 60 * 1000,
+  wsChallengeTtlMs: 30 * 1000,
+  quoteTtlDefaultMs: 15 * 60 * 1000,
+  quoteTtlMaxMs: 60 * 60 * 1000,
+  acceptPaymentTtlMs: 30 * 60 * 1000,
+  lockTtlMs: 5 * 60 * 1000
+};
