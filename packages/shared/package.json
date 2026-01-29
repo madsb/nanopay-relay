@@ -1,0 +1,6 @@
+{
+  "name": "@nanopay/shared",
+  "private": true,
+  "type": "module",
+  "version": "0.0.0"
+}

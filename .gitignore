@@ -1,0 +1,9 @@
+node_modules/
+.pnpm-debug.log
+
+.env
+.env.*
+
+apps/relay/db/
+
+.DS_Store
