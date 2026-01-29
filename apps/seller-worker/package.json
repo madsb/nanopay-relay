@@ -1,5 +1,14 @@
 {
   "name": "@nanopay/seller-worker",
   "version": "0.0.0",
-  "private": true
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx src/index.ts"
+  },
+  "dependencies": {
+    "@nanopay/shared": "workspace:*",
+    "undici": "^6.17.0",
+    "ws": "^8.17.1"
+  }
 }

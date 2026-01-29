@@ -1,9 +1,11 @@
 import Fastify, { type FastifyReply, type FastifyRequest } from 'fastify';
 import swagger from '@fastify/swagger';
 import swaggerUi from '@fastify/swagger-ui';
+import websocket from '@fastify/websocket';
+import { randomBytes } from 'node:crypto';
 import { sql } from 'kysely';
 import { z } from 'zod';
-import { sha256Hex, verifyCanonical } from '@nanopay/shared';
+import { sha256Hex, verifyCanonical, verifyNonce } from '@nanopay/shared';
 import { createDb, type JobStatus } from './db.js';
 import './types.js';
 
@@ -22,6 +24,7 @@ const MAX_PAYMENT_HASH_LEN = 128;
 const QUOTE_TTL_MS = 15 * 60 * 1000;
 const MAX_QUOTE_TTL_MS = 60 * 60 * 1000;
 const LOCK_TTL_MS = 5 * 60 * 1000;
+const WS_CHALLENGE_TTL_MS = 30 * 1000;
 
 const now = () => new Date();
 
@@ -87,6 +90,51 @@ const requireHex = (
 
 export const buildServer = async (databaseUrl?: string) => {
   const server = Fastify({ logger: true, bodyLimit: BODY_LIMIT_BYTES });
+  type WsSocket = {
+    readyState: number;
+    send: (data: string) => void;
+    close: () => void;
+    on: (event: string, listener: (...args: any[]) => void) => void;
+  };
+  const onlineSellers = new Map<string, Set<WsSocket>>();
+  const socketToSeller = new Map<WsSocket, string>();
+
+  const addOnlineSeller = (sellerPubkey: string, socket: WsSocket) => {
+    const existing = onlineSellers.get(sellerPubkey);
+    if (existing) {
+      existing.add(socket);
+    } else {
+      onlineSellers.set(sellerPubkey, new Set([socket]));
+    }
+    socketToSeller.set(socket, sellerPubkey);
+  };
+
+  const removeOnlineSeller = (socket: WsSocket) => {
+    const sellerPubkey = socketToSeller.get(socket);
+    if (!sellerPubkey) return;
+    const sockets = onlineSellers.get(sellerPubkey);
+    if (sockets) {
+      sockets.delete(socket);
+      if (sockets.size === 0) {
+        onlineSellers.delete(sellerPubkey);
+      }
+    }
+    socketToSeller.delete(socket);
+  };
+
+  const sendHint = (sellerPubkey: string) => {
+    const sockets = onlineSellers.get(sellerPubkey);
+    if (!sockets) return;
+    for (const socket of sockets) {
+      if (socket.readyState === 1) {
+        try {
+          socket.send(JSON.stringify({ type: 'hint.new_job' }));
+        } catch {
+          // ignore send errors; socket cleanup handled by close events
+        }
+      }
+    }
+  };
 
   const db = createDb(
     databaseUrl ??
@@ -128,6 +176,8 @@ export const buildServer = async (databaseUrl?: string) => {
   await server.register(swaggerUi, {
     routePrefix: '/docs'
   });
+
+  await server.register(websocket);
 
   const requireAuth = async (request: FastifyRequest, reply: FastifyReply) => {
     const pubkeyHeader = request.headers['x-molt-pubkey'];
@@ -214,6 +264,130 @@ export const buildServer = async (databaseUrl?: string) => {
 
     request.auth = { pubkey };
   };
+
+  server.get(
+    '/ws/seller',
+    { websocket: true },
+    (socket) => {
+      const nonce = randomBytes(16).toString('hex');
+      const expiresAt = new Date(Date.now() + WS_CHALLENGE_TTL_MS);
+
+      const sendWs = (payload: Record<string, unknown>) => {
+        if (socket.readyState === 1) {
+          socket.send(JSON.stringify(payload));
+        }
+      };
+
+      const sendWsError = (code: string, message: string) => {
+        sendWs({ type: 'error', code, message });
+        socket.close();
+      };
+
+      let authed = false;
+      let challengeUsed = false;
+      const expiryTimer = setTimeout(() => {
+        if (!authed) {
+          sendWsError('auth.expired_challenge', 'Auth challenge expired');
+        }
+      }, WS_CHALLENGE_TTL_MS);
+
+      sendWs({
+        type: 'auth.challenge',
+        nonce,
+        expires_at: expiresAt.toISOString(),
+        server_time: new Date().toISOString()
+      });
+
+      const cleanup = () => {
+        clearTimeout(expiryTimer);
+        removeOnlineSeller(socket);
+      };
+
+      socket.on('message', (data) => {
+        if (authed) {
+          sendWsError('ws.unknown_type', 'Unexpected message');
+          return;
+        }
+
+        const text =
+          typeof data === 'string'
+            ? data
+            : Buffer.isBuffer(data)
+              ? data.toString('utf8')
+              : String(data);
+        let payload: unknown;
+        try {
+          payload = JSON.parse(text);
+        } catch {
+          sendWsError('ws.invalid_json', 'Invalid JSON');
+          return;
+        }
+
+        if (
+          !payload ||
+          typeof payload !== 'object' ||
+          Array.isArray(payload)
+        ) {
+          sendWsError('ws.invalid_message', 'Invalid message');
+          return;
+        }
+
+        const message = payload as Record<string, unknown>;
+        if (message.type !== 'auth.response') {
+          sendWsError('ws.unknown_type', 'Unknown message type');
+          return;
+        }
+        if (challengeUsed) {
+          sendWsError('auth.invalid_signature', 'Challenge already used');
+          return;
+        }
+        challengeUsed = true;
+
+        if (Date.now() > expiresAt.getTime()) {
+          sendWsError('auth.expired_challenge', 'Auth challenge expired');
+          return;
+        }
+
+        const pubkey = message.pubkey;
+        const signature = message.signature;
+        if (
+          typeof pubkey !== 'string' ||
+          pubkey.length !== 64 ||
+          !isLowerHex(pubkey)
+        ) {
+          sendWsError('auth.invalid_pubkey', 'Invalid pubkey');
+          return;
+        }
+        if (
+          typeof signature !== 'string' ||
+          signature.length !== 128 ||
+          !isLowerHex(signature)
+        ) {
+          sendWsError('auth.invalid_signature', 'Invalid signature');
+          return;
+        }
+
+        let verified = false;
+        try {
+          verified = verifyNonce(nonce, signature, pubkey);
+        } catch {
+          verified = false;
+        }
+        if (!verified) {
+          sendWsError('auth.invalid_signature', 'Invalid signature');
+          return;
+        }
+
+        authed = true;
+        clearTimeout(expiryTimer);
+        addOnlineSeller(pubkey, socket);
+        sendWs({ type: 'auth.ok', seller_pubkey: pubkey });
+      });
+
+      socket.on('close', cleanup);
+      socket.on('error', cleanup);
+    }
+  );
 
   const PricingModeSchema = z.enum(['fixed', 'quote']);
   const OfferCreateSchema = z
@@ -348,6 +522,7 @@ export const buildServer = async (databaseUrl?: string) => {
     const sellerPubkey = query.seller_pubkey?.trim();
     const pricingMode = query.pricing_mode?.trim();
     const activeParam = query.active?.trim();
+    const onlineOnlyParam = query.online_only?.trim();
     const limitParam = query.limit?.trim();
     const offsetParam = query.offset?.trim();
 
@@ -369,6 +544,16 @@ export const buildServer = async (databaseUrl?: string) => {
       else if (activeParam === 'false') active = false;
       else {
         sendError(reply, 400, 'validation_error', 'Invalid active flag');
+        return;
+      }
+    }
+
+    let onlineOnly = false;
+    if (onlineOnlyParam !== undefined) {
+      if (onlineOnlyParam === 'true') onlineOnly = true;
+      else if (onlineOnlyParam === 'false') onlineOnly = false;
+      else {
+        sendError(reply, 400, 'validation_error', 'Invalid online_only flag');
         return;
       }
     }
@@ -408,7 +593,7 @@ export const buildServer = async (databaseUrl?: string) => {
     }
     if (tags.length > 0) {
       base = base.where(
-        sql<boolean>`tags @> ${sql.array(tags, 'text')}`
+        sql<boolean>`tags @> ARRAY[${sql.join(tags)}]::text[]`
       );
     }
     if (sellerPubkey) {
@@ -421,6 +606,14 @@ export const buildServer = async (databaseUrl?: string) => {
       base = base.where('active', '=', active);
     } else {
       base = base.where('active', '=', true);
+    }
+    if (onlineOnly) {
+      const onlineKeys = Array.from(onlineSellers.keys());
+      if (onlineKeys.length === 0) {
+        reply.send({ offers: [], limit, offset, total: 0 });
+        return;
+      }
+      base = base.where('seller_pubkey', 'in', onlineKeys);
     }
 
     const totalRow = await base
@@ -491,7 +684,97 @@ export const buildServer = async (databaseUrl?: string) => {
         })
         .returningAll()
         .executeTakeFirst();
+      sendHint(offer.seller_pubkey);
       reply.code(201).send({ job });
+    }
+  );
+
+  server.get(
+    '/v1/jobs',
+    { preHandler: requireAuth },
+    async (request, reply) => {
+      if (!request.auth) return;
+      const query = request.query as Record<string, string | undefined>;
+      const statusParam = query.status?.trim();
+      const roleParam = query.role?.trim();
+      const limitParam = query.limit?.trim();
+      const offsetParam = query.offset?.trim();
+
+      const limit = limitParam ? Number.parseInt(limitParam, 10) : 50;
+      const offset = offsetParam ? Number.parseInt(offsetParam, 10) : 0;
+
+      if (!Number.isFinite(limit) || limit < 1 || limit > 100) {
+        sendError(reply, 400, 'validation_error', 'Invalid limit');
+        return;
+      }
+      if (!Number.isFinite(offset) || offset < 0) {
+        sendError(reply, 400, 'validation_error', 'Invalid offset');
+        return;
+      }
+
+      if (roleParam && roleParam !== 'seller' && roleParam !== 'buyer') {
+        sendError(reply, 400, 'validation_error', 'Invalid role');
+        return;
+      }
+
+      const statusValues: JobStatus[] = [
+        'requested',
+        'quoted',
+        'accepted',
+        'running',
+        'delivered',
+        'failed',
+        'canceled',
+        'expired'
+      ];
+
+      let statuses: JobStatus[] = [];
+      if (statusParam) {
+        statuses = statusParam
+          .split(',')
+          .map((value) => value.trim())
+          .filter(Boolean)
+          .map((value) => value as JobStatus);
+        if (
+          statuses.length === 0 ||
+          statuses.some((status) => !statusValues.includes(status))
+        ) {
+          sendError(reply, 400, 'validation_error', 'Invalid status filter');
+          return;
+        }
+      }
+
+      let base = db.selectFrom('jobs');
+      if (roleParam === 'seller') {
+        base = base.where('seller_pubkey', '=', request.auth.pubkey);
+      } else if (roleParam === 'buyer') {
+        base = base.where('buyer_pubkey', '=', request.auth.pubkey);
+      } else {
+        base = base.where((eb) =>
+          eb.or([
+            eb('seller_pubkey', '=', request.auth.pubkey),
+            eb('buyer_pubkey', '=', request.auth.pubkey)
+          ])
+        );
+      }
+
+      if (statuses.length > 0) {
+        base = base.where('status', 'in', statuses);
+      }
+
+      const totalRow = await base
+        .select((eb) => eb.fn.countAll().as('count'))
+        .executeTakeFirst();
+      const total = Number(totalRow?.count ?? 0);
+
+      const jobs = await base
+        .selectAll()
+        .orderBy('created_at', 'desc')
+        .limit(limit)
+        .offset(offset)
+        .execute();
+
+      reply.send({ jobs, limit, offset, total });
     }
   );
 
@@ -595,6 +878,7 @@ export const buildServer = async (databaseUrl?: string) => {
         .where('job_id', '=', jobId)
         .returningAll()
         .executeTakeFirst();
+      sendHint(job.seller_pubkey);
       reply.send({ job: updated });
     }
   );
@@ -633,6 +917,7 @@ export const buildServer = async (databaseUrl?: string) => {
         .where('job_id', '=', jobId)
         .returningAll()
         .executeTakeFirst();
+      sendHint(job.seller_pubkey);
       reply.send({ job: updated });
     }
   );

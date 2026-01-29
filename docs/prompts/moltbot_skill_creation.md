@@ -30,6 +30,7 @@ Constraints (non‑negotiable):
 • Seller verifies payment.
 • Sellers should not open inbound ports; they connect outbound (WS + REST polling).
 • Keep API‑first. No UI requirements.
+• Use nanocurrency-js for wallet primitives; use Nano RPC for payment verification.
 
 Output format (markdown)
 

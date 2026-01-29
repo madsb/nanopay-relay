@@ -48,6 +48,13 @@ export const signCanonical = (
   return bytesToHex(signature);
 };
 
+export const signNonce = (nonce: string, privateKeyHex: string): string => {
+  const message = textEncoder.encode(nonce);
+  const secretKey = hexToBytes(privateKeyHex);
+  const signature = nacl.sign.detached(message, secretKey);
+  return bytesToHex(signature);
+};
+
 export const verifyCanonical = (
   input: CanonicalInput & { publicKeyHex: string; signatureHex: string }
 ): boolean => {
@@ -55,4 +62,21 @@ export const verifyCanonical = (
   const publicKey = hexToBytes(input.publicKeyHex);
   const signature = hexToBytes(input.signatureHex);
   return nacl.sign.detached.verify(message, signature, publicKey);
+};
+
+export const verifyNonce = (
+  nonce: string,
+  signatureHex: string,
+  publicKeyHex: string
+): boolean => {
+  const message = textEncoder.encode(nonce);
+  const publicKey = hexToBytes(publicKeyHex);
+  const signature = hexToBytes(signatureHex);
+  return nacl.sign.detached.verify(message, signature, publicKey);
+};
+
+export const publicKeyFromPrivateKeyHex = (privateKeyHex: string): string => {
+  const secretKey = hexToBytes(privateKeyHex);
+  const keypair = nacl.sign.keyPair.fromSecretKey(secretKey);
+  return bytesToHex(keypair.publicKey);
 };

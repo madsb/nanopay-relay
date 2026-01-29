@@ -4,6 +4,9 @@ export {
   sha256Hex,
   canonicalString,
   signCanonical,
-  verifyCanonical
+  verifyCanonical,
+  signNonce,
+  verifyNonce,
+  publicKeyFromPrivateKeyHex
 } from './crypto.js';
 export type { CanonicalInput } from './crypto.js';
