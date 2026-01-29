@@ -17,7 +17,8 @@
     "test": "pnpm --filter @nanopay/relay test",
     "gate:1": "node scripts/gate1.mjs",
     "gate:2": "node scripts/gate2.mjs",
-    "gate:3": "node scripts/gate3.mjs"
+    "gate:3": "node scripts/gate3.mjs",
+    "gate:4": "node scripts/gate4.mjs"
   },
   "devDependencies": {
     "@types/node": "^20.11.30",
