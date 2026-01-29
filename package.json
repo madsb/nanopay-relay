@@ -13,7 +13,8 @@
     "migrate": "node scripts/migrate.mjs",
     "dev": "pnpm --filter @nanopay/relay dev",
     "test": "pnpm --filter @nanopay/relay test",
-    "gate:1": "node scripts/gate1.mjs"
+    "gate:1": "node scripts/gate1.mjs",
+    "gate:2": "node scripts/gate2.mjs"
   },
   "devDependencies": {
     "@types/node": "^20.11.30",
