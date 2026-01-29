@@ -63,6 +63,9 @@ importers:
 
   apps/seller-worker:
     dependencies:
+      '@nanopay/relay-client':
+        specifier: workspace:*
+        version: link:../../packages/relay-client
       '@nanopay/shared':
         specifier: workspace:*
         version: link:../../packages/shared
@@ -72,6 +75,15 @@ importers:
       ws:
         specifier: ^8.17.1
         version: 8.19.0
+
+  packages/relay-client:
+    dependencies:
+      '@nanopay/shared':
+        specifier: workspace:*
+        version: link:../shared
+      undici:
+        specifier: ^6.17.0
+        version: 6.23.0
 
   packages/shared:
     dependencies:

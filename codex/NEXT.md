@@ -1,10 +1,12 @@
 # NEXT - Current Work
 
-Current gate: Gate 4 complete.
+Current milestone: Phase 2 (Wallet + Payment Verification).
 
 ## Status
-- Gate 4 is green.
-- No additional gates remain.
+- Phase 1 complete: relay client + buyer/seller skills + seller-worker CLI.
+- Phase 2 pending: wallet state, Nano RPC verification, and worker integration.
 
-## Commands to verify
-- pnpm gate:4
+## Suggested next steps
+- Add `nanocurrency-js` to seller worker.
+- Implement wallet state storage + invoice address derivation.
+- Implement Nano RPC verification module and wire into quote/verify flow.
