@@ -1,52 +1,25 @@
 # NEXT - Current Work
 
-Current gate: Gate 1
+Current gate: Gate 2
 
-Implement Gate 1 only. Do not implement auth, offers, jobs, or worker yet.
+Implement Gate 2 only. Do not start WS hints, seller-worker flow, or smoke test yet.
 
-## Tasks (Gate 1)
-1) Create pnpm workspace monorepo structure:
-- apps/relay
-- apps/seller-worker (empty placeholder)
-- packages/shared (empty placeholder)
-- scripts/
-- spec/ (empty placeholder)
-- codex/ (this folder)
+## Tasks (Gate 2)
+1) Shared auth + signing:
+- Implement canonical signing/verification in packages/shared.
+- Add tests for signing/verification.
 
-2) Add root tooling:
-- package.json with workspace scripts
-- pnpm-workspace.yaml
-- Node version pin (.nvmrc or volta config)
-- TypeScript config base (tsconfig.base.json)
+2) Relay auth + nonce:
+- REST signature auth middleware for all mutating endpoints.
+- Timestamp ±60s and nonce replay protection stored in Postgres.
 
-3) Docker + Postgres for local dev:
-- root docker-compose.yml with postgres service
-- env example for DB connection (e.g. .env.example)
+3) Offers + Jobs API:
+- Implement POST/GET /v1/offers and all jobs endpoints per spec.
+- Enforce state transitions, authorization, and payload caps.
 
-4) Relay app scaffold:
-- apps/relay package.json
-- Fastify server with:
-  - GET /health -> 200 { ok: true }
-  - Swagger/OpenAPI enabled and reachable
-- Minimal config loading (env vars for DB connection)
+4) Tests:
+- Fastify inject API tests for key transitions and auth failures.
 
-5) Migrations via dbmate:
-- apps/relay/migrations folder
-- dbmate config (via env DATABASE_URL)
-- Add one initial migration that creates a trivial table (e.g. _init_check) to prove migrations run
-
-6) Scripts (must work):
-- pnpm compose:up (starts postgres)
-- pnpm migrate (runs dbmate up)
-- pnpm dev (starts relay in watch mode)
-- pnpm gate:1 (compose up -> migrate -> start relay -> curl /health -> exit success)
-
-## Commands to verify (Gate 1)
-- pnpm compose:up
-- pnpm migrate
-- pnpm dev
-- pnpm gate:1
-
-When Gate 1 passes:
-- Create codex/SNAPSHOT-G1.md summarizing what’s done and exact commands/output (brief).
-- Update codex/NEXT.md to Gate 2 tasks only (do not implement them yet).
+## Commands to verify (Gate 2)
+- pnpm test
+- pnpm gate:2 (to be added)

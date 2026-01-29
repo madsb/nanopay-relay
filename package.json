@@ -1,0 +1,23 @@
+{
+  "name": "nanopay-relay",
+  "version": "0.0.0",
+  "private": true,
+  "packageManager": "pnpm@9.15.0",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "compose:up": "docker compose up -d postgres",
+    "compose:down": "docker compose down",
+    "migrate": "node scripts/migrate.mjs",
+    "dev": "pnpm --filter @nanopay/relay dev",
+    "test": "pnpm --filter @nanopay/relay test",
+    "gate:1": "node scripts/gate1.mjs"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.30",
+    "typescript": "^5.5.4",
+    "tsx": "^4.19.2"
+  }
+}

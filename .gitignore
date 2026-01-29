@@ -1,0 +1,7 @@
+node_modules
+.pnpm-store
+.env
+.env.*
+dist
+.DS_Store
+apps/relay/db
