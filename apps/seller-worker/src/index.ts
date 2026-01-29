@@ -7,31 +7,64 @@ import {
   signCanonical,
   signNonce
 } from '@nanopay/shared';
-
-type Job = {
-  job_id: string;
-  status: string;
-  request_payload: unknown;
-  quote_amount_raw: string | null;
-  quote_invoice_address: string | null;
-  quote_expires_at: string | null;
-  payment_tx_hash: string | null;
-  updated_at: string;
-};
+import { NanoRpcClient } from './nano-rpc.js';
+import { PaymentVerifier } from './payment-verifier.js';
+import type { Job } from './types.js';
+import { NanoWallet } from './wallet.js';
 
 const relayUrl = process.env.RELAY_URL ?? 'http://localhost:3000';
 const sellerPrivkey = process.env.SELLER_PRIVKEY;
-const nanoSeed = process.env.NANO_SEED ?? 'stub';
-const nanoRpcUrl = process.env.NANO_RPC_URL ?? 'stub';
+const nanoSeed = process.env.NANO_SEED;
+const nanoRpcUrl = process.env.NANO_RPC_URL;
+const walletStatePath = process.env.NANO_WALLET_STATE_PATH ?? './data/wallet-state.json';
+
+const parseEnvInt = (value: string | undefined, fallback: number) => {
+  const parsed = Number.parseInt(value ?? '', 10);
+  return Number.isFinite(parsed) ? parsed : fallback;
+};
+
+const nanoAccountIndexStart = parseEnvInt(
+  process.env.NANO_ACCOUNT_INDEX_START,
+  0
+);
+const nanoMinConfirmations = parseEnvInt(
+  process.env.NANO_MIN_CONFIRMATIONS,
+  1
+);
 
 if (!sellerPrivkey) {
   console.error('SELLER_PRIVKEY is required');
+  process.exit(1);
+}
+if (!nanoSeed) {
+  console.error('NANO_SEED is required');
+  process.exit(1);
+}
+if (!nanoRpcUrl) {
+  console.error('NANO_RPC_URL is required');
   process.exit(1);
 }
 
 const sellerPubkey = publicKeyFromPrivateKeyHex(sellerPrivkey);
 
 const wsUrl = relayUrl.replace(/^http/i, 'ws') + '/ws/seller';
+
+let wallet: NanoWallet | null = null;
+let paymentVerifier: PaymentVerifier | null = null;
+
+const getWallet = () => {
+  if (!wallet) {
+    throw new Error('Wallet not initialized');
+  }
+  return wallet;
+};
+
+const getPaymentVerifier = () => {
+  if (!paymentVerifier) {
+    throw new Error('Payment verifier not initialized');
+  }
+  return paymentVerifier;
+};
 
 const buildAuthHeaders = (method: string, path: string, body: Buffer) => {
   const timestamp = Math.floor(Date.now() / 1000).toString();
@@ -118,9 +151,10 @@ const listJobs = async (updatedAfter: string | null) => {
 };
 
 const createQuote = async (jobId: string) => {
+  const invoice = await getWallet().getOrCreateInvoice(jobId);
   const payload = {
     quote_amount_raw: '1000',
-    quote_invoice_address: `nano_1${randomBytes(16).toString('hex')}`,
+    quote_invoice_address: invoice.address,
     quote_expires_at: new Date(Date.now() + 10 * 60 * 1000).toISOString()
   };
   return apiRequest('POST', `/v1/jobs/${jobId}/quote`, payload);
@@ -135,8 +169,17 @@ const deliverJob = async (jobId: string, result: Record<string, unknown>) =>
     error: null
   });
 
-const verifyPayment = (hash: string | null) =>
-  Boolean(hash && hash.trim().length > 0);
+const verifyPayment = async (job: Job) => {
+  const verifier = getPaymentVerifier();
+  const result = await verifier.verify(job);
+  if (!result.verified) {
+    if (result.reason !== 'payment.not_found' && result.reason !== 'payment.unconfirmed') {
+      console.warn('Payment verification failed', job.job_id, result.reason, result.details);
+    }
+    return false;
+  }
+  return true;
+};
 
 const executeJob = (payload: unknown) => {
   const url =
@@ -187,7 +230,7 @@ const pollOnce = async () => {
 
       if (
         job.status === 'accepted' &&
-        verifyPayment(job.payment_tx_hash) &&
+        (await verifyPayment(job)) &&
         !deliveredJobs.has(job.job_id)
       ) {
         const lockRes = await lockJob(job.job_id);
@@ -309,8 +352,23 @@ const registerOfferWithRetry = async () => {
 };
 
 const main = async () => {
-  void nanoSeed;
-  void nanoRpcUrl;
+  try {
+    wallet = await NanoWallet.init({
+      seed: nanoSeed,
+      statePath: walletStatePath,
+      indexStart: nanoAccountIndexStart
+    });
+  } catch (error) {
+    console.error('Failed to initialize Nano wallet state', error);
+    process.exit(1);
+  }
+
+  const rpcClient = new NanoRpcClient(nanoRpcUrl);
+  paymentVerifier = new PaymentVerifier({
+    wallet: getWallet(),
+    rpc: rpcClient,
+    minConfirmations: nanoMinConfirmations
+  });
   void registerOfferWithRetry();
 
   connectWebSocket();

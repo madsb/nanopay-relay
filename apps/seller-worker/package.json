@@ -10,6 +10,7 @@
   "dependencies": {
     "@nanopay/relay-client": "workspace:*",
     "@nanopay/shared": "workspace:*",
+    "nanocurrency": "^2.5.0",
     "undici": "^6.17.0",
     "ws": "^8.17.1"
   }
