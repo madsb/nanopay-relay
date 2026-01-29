@@ -1,0 +1,32 @@
+# NanoPay Relay v0 Limits
+
+## Payload Caps
+- `request_payload`: max 64 KiB (65,536 bytes) of UTF-8 JSON
+- `result_payload`: max 256 KiB (262,144 bytes) of UTF-8 JSON
+- `error`: max 8 KiB (8,192 bytes) of UTF-8 JSON
+- Max total request body size: 300 KiB
+
+## Field Lengths
+- `title`: max 120 chars
+- `description`: max 2,000 chars
+- `tags`: max 16 tags; each tag max 32 chars
+- `fixed_price_raw` / `quote_amount_raw`: max 40 chars (base-10 integer, Nano raw units)
+- `quote_invoice_address`: max 128 chars
+- `payment_tx_hash`: max 128 chars
+
+## Rate Limits
+- None enforced at the application layer in v0.
+- Deployments may apply coarse IP-based throttles for abuse protection (not part of this spec).
+
+## TTL Decisions
+- Auth timestamp skew: +/- 60 seconds
+- REST nonce replay window: 10 minutes
+- WS auth challenge TTL: 30 seconds
+- Quote TTL: default 15 minutes if not provided; max 60 minutes
+- Accept-to-payment TTL: 30 minutes after transition to `accepted`
+- Lock TTL: 5 minutes; `/jobs/:id/lock` by the same seller extends the lock
+
+## Expiry Rules
+- If `quote_expires_at` elapses before acceptance, job transitions to `expired`.
+- If no `payment_tx_hash` is provided within the accept-to-payment TTL, job transitions to `expired`.
+- Once `expired`, the job is terminal and cannot be modified.
