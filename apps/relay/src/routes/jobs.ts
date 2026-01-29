@@ -3,16 +3,37 @@ import type { FastifyInstance } from "fastify";
 import { requireAuth } from "../auth.js";
 import { JOB_STATUS, LIMITS } from "../constants.js";
 import { HttpError, errorResponse } from "../errors.js";
+import { sql } from "kysely";
 import {
   enforceJsonSize,
   parseDate,
   secondsFromNow,
-  nowUtc
+  nowUtc,
+  parseLimit,
+  parseOffset
 } from "../utils.js";
 
 type JobParams = {
   id: string;
 };
+
+const jobStatusSchema = z.enum([
+  JOB_STATUS.requested,
+  JOB_STATUS.quoted,
+  JOB_STATUS.accepted,
+  JOB_STATUS.running,
+  JOB_STATUS.delivered,
+  JOB_STATUS.failed,
+  JOB_STATUS.canceled,
+  JOB_STATUS.expired
+]);
+
+const jobsQuerySchema = z.object({
+  status: jobStatusSchema.optional(),
+  offer_id: z.string().uuid().optional(),
+  limit: z.string().optional(),
+  offset: z.string().optional()
+});
 
 const jobCreateSchema = z.object({
   offer_id: z.string().uuid(),
@@ -157,7 +178,60 @@ export const registerJobRoutes = async (app: FastifyInstance) => {
         throw new HttpError(500, "internal_error", "Failed to create job");
       }
 
+      request.server.sellerPresence.notifySeller(inserted.seller_pubkey);
       reply.code(201).send({ job: serializeJob(inserted) });
+    }
+  );
+
+  app.get(
+    "/v1/jobs",
+    {
+      preHandler: requireAuth
+    },
+    async (request, reply) => {
+      if (!request.auth) return;
+      const pubkey = request.auth.pubkey;
+      const query = jobsQuerySchema.parse(request.query ?? {});
+      const limit = parseLimit(query.limit, 20, 100);
+      const offset = parseOffset(query.offset, 0);
+
+      let filtered = request.server.db
+        .selectFrom("jobs")
+        .where((eb) =>
+          eb.or([
+            eb("seller_pubkey", "=", pubkey),
+            eb("buyer_pubkey", "=", pubkey)
+          ])
+        );
+
+      if (query.status) {
+        filtered = filtered.where("status", "=", query.status);
+      }
+
+      if (query.offer_id) {
+        filtered = filtered.where("offer_id", "=", query.offer_id);
+      }
+
+      const [rows, countResult] = await Promise.all([
+        filtered
+          .selectAll()
+          .orderBy("updated_at", "desc")
+          .limit(limit)
+          .offset(offset)
+          .execute(),
+        filtered
+          .select(sql<number>`count(*)`.as("count"))
+          .executeTakeFirst()
+      ]);
+
+      const total = Number(countResult?.count ?? 0);
+
+      reply.send({
+        jobs: rows.map((job) => serializeJob(job as Record<string, unknown>)),
+        limit,
+        offset,
+        total
+      });
     }
   );
 
@@ -276,6 +350,7 @@ export const registerJobRoutes = async (app: FastifyInstance) => {
         throw new HttpError(500, "internal_error", "Failed to accept job");
       }
 
+      request.server.sellerPresence.notifySeller(updated.seller_pubkey);
       reply.send({ job: serializeJob(updated) });
     }
   );
@@ -327,6 +402,7 @@ export const registerJobRoutes = async (app: FastifyInstance) => {
         throw new HttpError(500, "internal_error", "Failed to attach payment");
       }
 
+      request.server.sellerPresence.notifySeller(updated.seller_pubkey);
       reply.send({ job: serializeJob(updated) });
     }
   );

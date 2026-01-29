@@ -15,7 +15,8 @@ export const LIMITS = {
   paymentTtlSeconds: 30 * 60,
   lockTtlSeconds: 5 * 60,
   authSkewSeconds: 60,
-  nonceTtlSeconds: 10 * 60
+  nonceTtlSeconds: 10 * 60,
+  wsAuthChallengeTtlSeconds: 30
 } as const;
 
 export const HEADER_NAMES = {

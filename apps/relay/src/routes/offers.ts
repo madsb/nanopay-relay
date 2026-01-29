@@ -151,6 +151,15 @@ export const registerOfferRoutes = async (app: FastifyInstance) => {
       );
     }
 
+    if (onlineOnly) {
+      const onlineSellers = request.server.sellerPresence.listOnline();
+      if (onlineSellers.length === 0) {
+        reply.send({ offers: [], limit, offset, total: 0 });
+        return;
+      }
+      filtered = filtered.where("seller_pubkey", "in", onlineSellers);
+    }
+
     const [rows, countResult] = await Promise.all([
       filtered
         .selectAll()

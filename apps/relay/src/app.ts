@@ -7,6 +7,7 @@ import { LIMITS } from "./constants.js";
 import { errorResponse, toErrorResponse } from "./errors.js";
 import { registerOfferRoutes } from "./routes/offers.js";
 import { registerJobRoutes } from "./routes/jobs.js";
+import { createSellerPresence, registerSellerWebsocket } from "./ws.js";
 
 export const createApp = async (options?: { databaseUrl?: string }) => {
   const app = Fastify({
@@ -16,6 +17,7 @@ export const createApp = async (options?: { databaseUrl?: string }) => {
 
   const db = createDb(options?.databaseUrl ?? config.databaseUrl);
   app.decorate("db", db);
+  app.decorate("sellerPresence", createSellerPresence());
   app.addHook("onClose", async () => {
     await db.destroy();
   });
@@ -103,6 +105,7 @@ export const createApp = async (options?: { databaseUrl?: string }) => {
 
   app.get("/", async () => ({ name: "nanopay-relay", docs: "/docs" }));
 
+  await registerSellerWebsocket(app);
   await registerOfferRoutes(app);
   await registerJobRoutes(app);
 

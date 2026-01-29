@@ -12,6 +12,7 @@
     "migrate": "pnpm -C apps/relay migrate",
     "test": "pnpm -C apps/relay test",
     "gate:1": "node scripts/gate-1.mjs",
-    "gate:2": "node scripts/gate-2.mjs"
+    "gate:2": "node scripts/gate-2.mjs",
+    "gate:3": "node scripts/gate-3.mjs"
   }
 }
