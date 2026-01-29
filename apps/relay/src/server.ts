@@ -699,6 +699,7 @@ export const buildServer = async (databaseUrl?: string) => {
       const roleParam = query.role?.trim();
       const limitParam = query.limit?.trim();
       const offsetParam = query.offset?.trim();
+      const updatedAfterParam = query.updated_after?.trim();
 
       const limit = limitParam ? Number.parseInt(limitParam, 10) : 50;
       const offset = offsetParam ? Number.parseInt(offsetParam, 10) : 0;
@@ -715,6 +716,16 @@ export const buildServer = async (databaseUrl?: string) => {
       if (roleParam && roleParam !== 'seller' && roleParam !== 'buyer') {
         sendError(reply, 400, 'validation_error', 'Invalid role');
         return;
+      }
+
+      let updatedAfter: Date | null = null;
+      if (updatedAfterParam) {
+        const parsed = new Date(updatedAfterParam);
+        if (Number.isNaN(parsed.getTime())) {
+          sendError(reply, 400, 'validation_error', 'Invalid updated_after');
+          return;
+        }
+        updatedAfter = parsed;
       }
 
       const statusValues: JobStatus[] = [
@@ -761,18 +772,23 @@ export const buildServer = async (databaseUrl?: string) => {
       if (statuses.length > 0) {
         base = base.where('status', 'in', statuses);
       }
+      if (updatedAfter) {
+        base = base.where('updated_at', '>', updatedAfter);
+      }
 
       const totalRow = await base
         .select((eb) => eb.fn.countAll().as('count'))
         .executeTakeFirst();
       const total = Number(totalRow?.count ?? 0);
 
-      const jobs = await base
-        .selectAll()
-        .orderBy('created_at', 'desc')
-        .limit(limit)
-        .offset(offset)
-        .execute();
+      let jobsQuery = base.selectAll();
+      if (updatedAfter) {
+        jobsQuery = jobsQuery.orderBy('updated_at', 'asc');
+      } else {
+        jobsQuery = jobsQuery.orderBy('created_at', 'desc');
+      }
+
+      const jobs = await jobsQuery.limit(limit).offset(offset).execute();
 
       reply.send({ jobs, limit, offset, total });
     }

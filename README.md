@@ -20,6 +20,7 @@ Run the seller worker (in a second terminal). `RELAY_URL` defaults to `http://lo
 export SELLER_PRIVKEY=a90f48f3a42f83fb9c5a9c3debd29691e764d01c743b41a735f002cab0265f02d1c228f40a1203c283bdbd5ba53267fcde9cc43928af9e40914b462f007f0d90
 pnpm worker
 ```
+The worker uses `/v1/jobs` with an `updated_after` cursor to reduce polling, and the WS `hint.new_job` triggers an immediate poll.
 
 Health check:
 ```bash

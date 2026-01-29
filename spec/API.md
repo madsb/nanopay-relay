@@ -1,7 +1,7 @@
 # NanoPay Relay v0 API
 
 ## Conventions
-- Base path: `/`
+- Base path: `/v1`
 - Content-Type: `application/json; charset=utf-8`
 - Timestamps: RFC 3339 / ISO 8601 UTC, e.g. `2026-01-29T12:34:56Z`
 - IDs: UUID v4 strings
@@ -9,8 +9,8 @@
 
 ## Authentication
 - All **mutating** endpoints require Molt headers (see `spec/AUTH.md`).
-- `GET /jobs/:id` also requires auth and is restricted to the job buyer or seller.
-- `GET /offers` is public (no auth).
+- `GET /v1/jobs/:id` also requires auth and is restricted to the job buyer or seller.
+- `GET /v1/offers` is public (no auth).
 
 ## Data Shapes
 
@@ -64,7 +64,7 @@
 
 ## Endpoints
 
-### POST /offers (seller)
+### POST /v1/offers (seller)
 Create an offer for the authenticated seller.
 
 Auth: required (seller)
@@ -90,7 +90,7 @@ Response 201:
 { "offer": <Offer> }
 ```
 
-### GET /offers (buyer)
+### GET /v1/offers (buyer)
 Search and list active offers.
 
 Auth: not required
@@ -115,7 +115,7 @@ Response 200:
 ```
 Ordering: `created_at` DESC.
 
-### POST /jobs (buyer)
+### POST /v1/jobs (buyer)
 Create a job request for a specific offer.
 
 Auth: required (buyer)
@@ -136,7 +136,27 @@ Response 201:
 { "job": <Job> }
 ```
 
-### POST /jobs/:id/quote (seller)
+### GET /v1/jobs (buyer/seller)
+List jobs visible to the authenticated caller.
+
+Auth: required (buyer or seller)
+
+Query parameters:
+- `status` (optional): comma-separated job status filters
+- `role` (optional): `seller` | `buyer` (defaults to both)
+- `limit` (optional, default 50, max 100)
+- `offset` (optional, default 0)
+- `updated_after` (optional): RFC 3339 timestamp; only return jobs with `updated_at` after this time
+
+Response 200:
+```
+{ "jobs": [<Job>], "limit": 50, "offset": 0, "total": 123 }
+```
+Ordering:
+- If `updated_after` is set: `updated_at` ASC
+- Otherwise: `created_at` DESC
+
+### POST /v1/jobs/:id/quote (seller)
 Submit a quote for a requested job.
 
 Auth: required (seller; must match job.seller_pubkey)
@@ -157,7 +177,7 @@ Response 200:
 { "job": <Job> }
 ```
 
-### POST /jobs/:id/accept (buyer)
+### POST /v1/jobs/:id/accept (buyer)
 Accept a quote before it expires.
 
 Auth: required (buyer; must match job.buyer_pubkey)
@@ -172,7 +192,7 @@ Response 200:
 { "job": <Job> }
 ```
 
-### POST /jobs/:id/payment (buyer)
+### POST /v1/jobs/:id/payment (buyer)
 Attach a Nano transaction hash after paying the invoice.
 
 Auth: required (buyer; must match job.buyer_pubkey)
@@ -189,7 +209,7 @@ Response 200:
 { "job": <Job> }
 ```
 
-### POST /jobs/:id/lock (seller)
+### POST /v1/jobs/:id/lock (seller)
 Acquire the execution lock and transition the job to `running`.
 
 Auth: required (seller; must match job.seller_pubkey)
@@ -209,7 +229,7 @@ Response 200:
 { "job": <Job> }
 ```
 
-### POST /jobs/:id/deliver (seller)
+### POST /v1/jobs/:id/deliver (seller)
 Deliver the final result or a failure.
 
 Auth: required (seller; must match job.seller_pubkey)
@@ -241,7 +261,7 @@ Response 200:
 { "job": <Job> }
 ```
 
-### GET /jobs/:id (buyer/seller)
+### GET /v1/jobs/:id (buyer/seller)
 Retrieve job state.
 
 Auth: required (buyer or seller; must match job.buyer_pubkey or job.seller_pubkey)
@@ -251,7 +271,7 @@ Response 200:
 { "job": <Job> }
 ```
 
-### POST /jobs/:id/cancel (buyer)
+### POST /v1/jobs/:id/cancel (buyer)
 Cancel a job before it starts running.
 
 Auth: required (buyer; must match job.buyer_pubkey)

@@ -16,6 +16,7 @@ type Job = {
   quote_invoice_address: string | null;
   quote_expires_at: string | null;
   payment_tx_hash: string | null;
+  updated_at: string;
 };
 
 const relayUrl = process.env.RELAY_URL ?? 'http://localhost:3000';
@@ -102,9 +103,17 @@ const registerOffer = async () => {
   return response.data?.offer.offer_id ?? null;
 };
 
-const listJobs = async () => {
-  const path =
-    '/v1/jobs?role=seller&status=requested,accepted&limit=50&offset=0';
+const listJobs = async (updatedAfter: string | null) => {
+  const params = new URLSearchParams({
+    role: 'seller',
+    status: 'requested,accepted',
+    limit: '50',
+    offset: '0'
+  });
+  if (updatedAfter) {
+    params.set('updated_after', updatedAfter);
+  }
+  const path = `/v1/jobs?${params.toString()}`;
   return apiRequest<{ jobs: Job[] }>('GET', path);
 };
 
@@ -145,17 +154,26 @@ const executeJob = (payload: unknown) => {
 const quotedJobs = new Set<string>();
 const deliveredJobs = new Set<string>();
 let polling = false;
+let lastUpdatedAt: string | null = null;
 
 const pollOnce = async () => {
   if (polling) return;
   polling = true;
   try {
-    const response = await listJobs();
+    const response = await listJobs(lastUpdatedAt);
     if (response.status !== 200 || !response.data) {
       console.error('Failed to list jobs', response.status, response.data);
       return;
     }
+    let newest = lastUpdatedAt;
     for (const job of response.data.jobs) {
+      if (
+        job.updated_at &&
+        (!newest ||
+          new Date(job.updated_at).getTime() > new Date(newest).getTime())
+      ) {
+        newest = job.updated_at;
+      }
       if (job.status === 'requested' && !quotedJobs.has(job.job_id)) {
         const quoteRes = await createQuote(job.job_id);
         if (quoteRes.status === 200) {
@@ -188,6 +206,7 @@ const pollOnce = async () => {
         }
       }
     }
+    lastUpdatedAt = newest;
   } catch (error) {
     console.error('Polling error', error);
   } finally {

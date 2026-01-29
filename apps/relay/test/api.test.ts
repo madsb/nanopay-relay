@@ -224,4 +224,144 @@ describe('relay api', () => {
     expect(jobRes.statusCode).toBe(413);
     expect(JSON.parse(jobRes.body).error.code).toBe('payload_too_large');
   });
+
+  it('filters jobs by updated_after', async () => {
+    const offerPayload = {
+      title: 'Updated After',
+      description: 'Cursor filtering',
+      tags: ['cursor'],
+      pricing_mode: 'fixed',
+      fixed_price_raw: '1000',
+      active: true
+    };
+    const offerRes = await signedInject({
+      method: 'POST',
+      url: '/v1/offers',
+      body: offerPayload,
+      keypair: seller
+    });
+    expect(offerRes.statusCode).toBe(201);
+    const offer = JSON.parse(offerRes.body).offer;
+
+    const jobRes1 = await signedInject({
+      method: 'POST',
+      url: '/v1/jobs',
+      body: {
+        offer_id: offer.offer_id,
+        request_payload: { url: 'https://example.com/1' }
+      },
+      keypair: buyer
+    });
+    expect(jobRes1.statusCode).toBe(201);
+    const job1 = JSON.parse(jobRes1.body).job;
+
+    await new Promise((resolve) => setTimeout(resolve, 5));
+
+    const jobRes2 = await signedInject({
+      method: 'POST',
+      url: '/v1/jobs',
+      body: {
+        offer_id: offer.offer_id,
+        request_payload: { url: 'https://example.com/2' }
+      },
+      keypair: buyer
+    });
+    expect(jobRes2.statusCode).toBe(201);
+    const job2 = JSON.parse(jobRes2.body).job;
+
+    const updatedAfter = new Date(job1.updated_at);
+    updatedAfter.setMilliseconds(updatedAfter.getMilliseconds() + 1);
+
+    const listRes = await signedInject({
+      method: 'GET',
+      url: `/v1/jobs?role=buyer&updated_after=${encodeURIComponent(
+        updatedAfter.toISOString()
+      )}`,
+      keypair: buyer
+    });
+    expect(listRes.statusCode).toBe(200);
+    const jobs = JSON.parse(listRes.body).jobs;
+    expect(jobs).toHaveLength(1);
+    expect(jobs[0].job_id).toBe(job2.job_id);
+  });
+
+  it('validates updated_after in job listing', async () => {
+    const listRes = await signedInject({
+      method: 'GET',
+      url: '/v1/jobs?role=buyer&updated_after=not-a-date',
+      keypair: buyer
+    });
+    expect(listRes.statusCode).toBe(400);
+    expect(JSON.parse(listRes.body).error.code).toBe('validation_error');
+  });
+
+  it('orders jobs by updated_at when updated_after is set', async () => {
+    const offerPayload = {
+      title: 'Order by updated_at',
+      description: 'Ordering check',
+      tags: ['order'],
+      pricing_mode: 'fixed',
+      fixed_price_raw: '1000',
+      active: true
+    };
+    const offerRes = await signedInject({
+      method: 'POST',
+      url: '/v1/offers',
+      body: offerPayload,
+      keypair: seller
+    });
+    expect(offerRes.statusCode).toBe(201);
+    const offer = JSON.parse(offerRes.body).offer;
+
+    const jobRes1 = await signedInject({
+      method: 'POST',
+      url: '/v1/jobs',
+      body: {
+        offer_id: offer.offer_id,
+        request_payload: { url: 'https://example.com/1' }
+      },
+      keypair: buyer
+    });
+    expect(jobRes1.statusCode).toBe(201);
+    const job1 = JSON.parse(jobRes1.body).job;
+
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    const jobRes2 = await signedInject({
+      method: 'POST',
+      url: '/v1/jobs',
+      body: {
+        offer_id: offer.offer_id,
+        request_payload: { url: 'https://example.com/2' }
+      },
+      keypair: buyer
+    });
+    expect(jobRes2.statusCode).toBe(201);
+    const job2 = JSON.parse(jobRes2.body).job;
+
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    const quoteRes = await signedInject({
+      method: 'POST',
+      url: `/v1/jobs/${job1.job_id}/quote`,
+      body: {
+        quote_amount_raw: '2500',
+        quote_invoice_address: 'nano_1exampleaddress',
+        quote_expires_at: new Date(Date.now() + 5 * 60 * 1000).toISOString()
+      },
+      keypair: seller
+    });
+    expect(quoteRes.statusCode).toBe(200);
+
+    const listRes = await signedInject({
+      method: 'GET',
+      url: '/v1/jobs?role=seller&updated_after=1970-01-01T00:00:00Z',
+      keypair: seller
+    });
+    expect(listRes.statusCode).toBe(200);
+    const jobs = JSON.parse(listRes.body).jobs;
+    expect(jobs).toHaveLength(2);
+    expect(jobs[0].job_id).toBe(job2.job_id);
+    expect(jobs[1].job_id).toBe(job1.job_id);
+  });
 });
