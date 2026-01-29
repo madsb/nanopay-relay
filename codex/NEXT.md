@@ -1,30 +1,21 @@
 # NEXT - Current Work
 
-Current gate: Gate 2
+Current gate: Gate 3
 
-Implement Gate 2 only. Do not start Gate 3 WS presence or seller-worker flows yet.
+Implement Gate 3 only. Do not start Gate 4 stabilization work yet.
 
-## Tasks (Gate 2)
-1) Auth + signatures
-- Implement Ed25519 canonical signing/verification in `packages/shared`.
-- Add REST auth middleware for mutating routes with nonce replay protection.
+## Tasks (Gate 3)
+1) WebSocket presence
+- Implement `/ws/seller` auth handshake per `spec/WS.md`.
+- Track online sellers and expose to offers search via `online_only` filter.
 
-2) DB + models
-- Add migrations for `offers` and `jobs` per `spec/DB.md`.
-- Wire Kysely models/queries in `apps/relay`.
+2) Hint notifications
+- Emit `{ "type": "hint.new_job" }` to online sellers on job create, accept, and payment.
 
-3) Offers endpoints
-- POST `/v1/offers`
-- GET `/v1/offers` with query/tags/online_only filters
+3) Seller worker flow (mock payment)
+- Seller-worker connects via WS, registers a demo offer, polls jobs.
+- Quote, accept payment hash, lock, execute dummy task, deliver result.
 
-4) Jobs endpoints + state machine
-- Implement job lifecycle routes per `spec/API.md` + `spec/PRD.md`.
-- Enforce state transitions and authorization rules.
-
-5) Limits + validation
-- Enforce payload caps from `spec/LIMITS.md`.
-- Zod validation for request/response shapes.
-
-6) Tests + gate
-- Add API tests for auth failures and key transitions.
-- Ensure `pnpm gate:2` passes.
+4) Smoke test
+- Add a script that runs a buyer->seller flow with mock payment verification.
+- Ensure `pnpm gate:3` passes.
