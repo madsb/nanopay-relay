@@ -258,21 +258,22 @@ Relay does **not**:
 ### Offers
 
 ```
-POST /offers          (seller)
-GET  /offers          (buyer)
+POST /v1/offers          (seller)
+GET  /v1/offers          (buyer)
 ```
 
 ### Jobs
 
 ```
-POST /jobs                      (buyer)
-POST /jobs/:id/quote            (seller)
-POST /jobs/:id/accept           (buyer)
-POST /jobs/:id/payment          (buyer)
-POST /jobs/:id/lock             (seller)
-POST /jobs/:id/deliver           (seller)
-GET  /jobs/:id                  (buyer/seller)
-POST /jobs/:id/cancel           (buyer)
+POST /v1/jobs                      (buyer)
+GET  /v1/jobs                      (buyer/seller)
+POST /v1/jobs/:id/quote            (seller)
+POST /v1/jobs/:id/accept           (buyer)
+POST /v1/jobs/:id/payment          (buyer)
+POST /v1/jobs/:id/lock             (seller)
+POST /v1/jobs/:id/deliver           (seller)
+GET  /v1/jobs/:id                  (buyer/seller)
+POST /v1/jobs/:id/cancel           (buyer)
 ```
 
 ### WebSocket

@@ -1,13 +1,14 @@
 # NEXT - Current Work
 
-Current milestone: Phase 4 (Hardening + Docs).
+Current milestone: Phase 5 (Testing & Validation).
 
 ## Status
 - Phase 1 complete: relay client + buyer/seller skills + seller-worker CLI.
 - Phase 2 complete: wallet state + Nano RPC verification wired into seller worker.
 - Phase 3 complete: resilience (WS reconnect/backoff), polling cursor, lock renewal, crash recovery.
+- Phase 4 complete: idempotency keys, rate limiting, request IDs + metrics, docs aligned to `/v1`.
 
 ## Suggested next steps
-- Add idempotency key support on mutating endpoints with DB backing.
-- Implement rate limiting (per IP + pubkey) and optional Redis integration.
-- Add structured logging + request IDs and basic metrics counters.
+- Add unit tests for wallet derivation + payment verification logic.
+- Add integration tests with mocked Nano RPC.
+- Add end-to-end test on Nano testnet (optional).

@@ -59,10 +59,20 @@ export interface NonceTable {
   created_at: Date;
 }
 
+export interface IdempotencyTable {
+  pubkey: string;
+  idempotency_key: string;
+  request_hash: string;
+  response_status: number | null;
+  response_body: JsonColumn | null;
+  created_at: Date;
+}
+
 export interface Database {
   offers: OfferTable;
   jobs: JobTable;
   nonces: NonceTable;
+  idempotency_keys: IdempotencyTable;
 }
 
 export const createDb = (databaseUrl: string) =>

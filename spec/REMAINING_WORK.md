@@ -312,7 +312,7 @@ NANO_WALLET_STATE_PATH=./data/wallet-state.json
 
 ## 7) Security & Abuse Controls
 
-- **Rate limits**: token bucket per IP + per pubkey; stricter on `POST /jobs` and `POST /offers`.
+- **Rate limits**: token bucket per IP + per pubkey; stricter on `POST /v1/jobs` and `POST /v1/offers`.
 - **Idempotency**: add `Idempotency-Key` header support on all mutating endpoints; store key + request hash with TTL.
 - **Replay protection**: existing auth nonces + new payment hash uniqueness checks per seller.
 - **Lock safety**: enforce lock lease; allow renewal only by owner; on expiry, allow re-lock.

@@ -9,6 +9,13 @@ import { sha256Hex, verifyCanonical, verifyNonce } from '@nanopay/shared';
 import { createDb, type JobStatus } from './db.js';
 import './types.js';
 
+const parseEnvInt = (name: string, fallback: number): number => {
+  const raw = process.env[name];
+  if (!raw) return fallback;
+  const value = Number.parseInt(raw, 10);
+  return Number.isFinite(value) ? value : fallback;
+};
+
 const BODY_LIMIT_BYTES = 300 * 1024;
 const MAX_REQUEST_PAYLOAD_BYTES = 64 * 1024;
 const MAX_RESULT_PAYLOAD_BYTES = 256 * 1024;
@@ -20,11 +27,20 @@ const MAX_TAG_LEN = 32;
 const MAX_PRICE_LEN = 40;
 const MAX_INVOICE_LEN = 128;
 const MAX_PAYMENT_HASH_LEN = 128;
+const MAX_IDEMPOTENCY_KEY_LEN = 128;
 
 const QUOTE_TTL_MS = 15 * 60 * 1000;
 const MAX_QUOTE_TTL_MS = 60 * 60 * 1000;
 const LOCK_TTL_MS = 5 * 60 * 1000;
 const WS_CHALLENGE_TTL_MS = 30 * 1000;
+const IDEMPOTENCY_TTL_MS = 24 * 60 * 60 * 1000;
+
+const RATE_LIMIT_WINDOW_MS = parseEnvInt('RELAY_RATE_LIMIT_WINDOW_MS', 60_000);
+const RATE_LIMIT_IP_MAX = parseEnvInt('RELAY_RATE_LIMIT_IP_MAX', 120);
+const RATE_LIMIT_PUBKEY_MAX = parseEnvInt('RELAY_RATE_LIMIT_PUBKEY_MAX', 60);
+const RATE_LIMIT_STRICT_MAX = parseEnvInt('RELAY_RATE_LIMIT_STRICT_MAX', 30);
+const RATE_LIMIT_ENABLED =
+  process.env.RELAY_RATE_LIMIT_ENABLED !== 'false';
 
 const now = () => new Date();
 
@@ -75,6 +91,55 @@ const requireJsonSize = (
 
 const isLowerHex = (value: string) => /^[0-9a-f]+$/.test(value);
 
+type Metrics = {
+  counters: Record<string, number>;
+  inc: (name: string, labels?: Record<string, string>) => void;
+  snapshot: () => { counters: Record<string, number> };
+};
+
+const formatMetricKey = (
+  name: string,
+  labels?: Record<string, string>
+): string => {
+  if (!labels || Object.keys(labels).length === 0) return name;
+  const parts = Object.entries(labels)
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([key, value]) => `${key}=${value}`);
+  return `${name}{${parts.join(',')}}`;
+};
+
+const createMetrics = (): Metrics => {
+  const counters: Record<string, number> = {};
+  return {
+    counters,
+    inc: (name, labels) => {
+      const key = formatMetricKey(name, labels);
+      counters[key] = (counters[key] ?? 0) + 1;
+    },
+    snapshot: () => ({ counters: { ...counters } })
+  };
+};
+
+const parseResponsePayload = (payload: unknown): unknown => {
+  if (payload === undefined || payload === null || payload === '') return null;
+  if (Buffer.isBuffer(payload)) {
+    const text = payload.toString('utf8');
+    try {
+      return JSON.parse(text);
+    } catch {
+      return { raw: text };
+    }
+  }
+  if (typeof payload === 'string') {
+    try {
+      return JSON.parse(payload);
+    } catch {
+      return { raw: payload };
+    }
+  }
+  return payload;
+};
+
 const requireHex = (
   reply: FastifyReply,
   value: string | undefined,
@@ -89,7 +154,83 @@ const requireHex = (
 };
 
 export const buildServer = async (databaseUrl?: string) => {
-  const server = Fastify({ logger: true, bodyLimit: BODY_LIMIT_BYTES });
+  const server = Fastify({
+    logger: { level: process.env.LOG_LEVEL ?? 'info' },
+    bodyLimit: BODY_LIMIT_BYTES,
+    genReqId: (req) => {
+      const header = req.headers['x-request-id'];
+      if (typeof header === 'string' && header.length <= 64) {
+        return header;
+      }
+      return randomBytes(16).toString('hex');
+    }
+  });
+  const metrics = createMetrics();
+  server.decorate('metrics', metrics);
+
+  const rateBuckets = new Map<string, { tokens: number; last: number }>();
+  let lastRateSweep = Date.now();
+
+  const getPath = (request: FastifyRequest): string => {
+    const rawPath = request.raw.url ?? request.url;
+    return rawPath.split('?')[0] ?? rawPath;
+  };
+
+  const isRateLimitedPath = (request: FastifyRequest): boolean => {
+    const path = getPath(request);
+    return path.startsWith('/v1/');
+  };
+
+  const isStrictRateLimit = (request: FastifyRequest): boolean => {
+    const path = getPath(request);
+    return (
+      request.method === 'POST' &&
+      (path === '/v1/jobs' || path === '/v1/offers')
+    );
+  };
+
+  const sweepRateBuckets = (now: number) => {
+    if (now - lastRateSweep < RATE_LIMIT_WINDOW_MS) return;
+    const expiry = RATE_LIMIT_WINDOW_MS * 2;
+    for (const [key, bucket] of rateBuckets.entries()) {
+      if (now - bucket.last > expiry) {
+        rateBuckets.delete(key);
+      }
+    }
+    lastRateSweep = now;
+  };
+
+  const takeRateLimit = (
+    key: string,
+    limit: number
+  ): { allowed: boolean; retryAfterSeconds: number } => {
+    if (limit <= 0) {
+      return {
+        allowed: false,
+        retryAfterSeconds: Math.ceil(RATE_LIMIT_WINDOW_MS / 1000)
+      };
+    }
+    const now = Date.now();
+    sweepRateBuckets(now);
+    const existing = rateBuckets.get(key) ?? { tokens: limit, last: now };
+    const refillRate = limit / RATE_LIMIT_WINDOW_MS;
+    const elapsed = now - existing.last;
+    const tokens = Math.min(limit, existing.tokens + elapsed * refillRate);
+    if (tokens < 1) {
+      existing.tokens = tokens;
+      existing.last = now;
+      rateBuckets.set(key, existing);
+      const retryAfterMs = Math.ceil((1 - tokens) / refillRate);
+      return {
+        allowed: false,
+        retryAfterSeconds: Math.max(1, Math.ceil(retryAfterMs / 1000))
+      };
+    }
+    existing.tokens = tokens - 1;
+    existing.last = now;
+    rateBuckets.set(key, existing);
+    return { allowed: true, retryAfterSeconds: 0 };
+  };
   type WsSocket = {
     readyState: number;
     send: (data: string) => void;
@@ -146,6 +287,31 @@ export const buildServer = async (databaseUrl?: string) => {
     await db.destroy();
   });
 
+  server.addHook('onRequest', async (request, reply) => {
+    reply.header('x-request-id', request.id);
+    if (!RATE_LIMIT_ENABLED) return;
+    if (!isRateLimitedPath(request)) return;
+
+    const strict = isStrictRateLimit(request);
+    const limit = strict ? RATE_LIMIT_STRICT_MAX : RATE_LIMIT_IP_MAX;
+    const key = `ip:${request.ip}:${strict ? 'strict' : 'default'}`;
+    const { allowed, retryAfterSeconds } = takeRateLimit(key, limit);
+    if (!allowed) {
+      reply.header('retry-after', retryAfterSeconds.toString());
+      metrics.inc('rate_limited', {
+        scope: 'ip',
+        path: getPath(request),
+        method: request.method
+      });
+      sendError(reply, 429, 'rate_limited', 'Rate limit exceeded', {
+        scope: 'ip',
+        limit,
+        window_ms: RATE_LIMIT_WINDOW_MS
+      });
+      return;
+    }
+  });
+
   server.addContentTypeParser(
     'application/json',
     { parseAs: 'buffer' },
@@ -179,6 +345,16 @@ export const buildServer = async (databaseUrl?: string) => {
 
   await server.register(websocket);
 
+  const authFail = (
+    reply: FastifyReply,
+    code: string,
+    message: string,
+    details: Record<string, unknown> | null = null
+  ) => {
+    metrics.inc('auth.failure', { code });
+    sendError(reply, 401, code, message, details);
+  };
+
   const requireAuth = async (request: FastifyRequest, reply: FastifyReply) => {
     const pubkeyHeader = request.headers['x-molt-pubkey'];
     const timestampHeader = request.headers['x-molt-timestamp'];
@@ -192,29 +368,33 @@ export const buildServer = async (databaseUrl?: string) => {
     const signature =
       typeof signatureHeader === 'string' ? signatureHeader : undefined;
 
-    if (
-      !requireHex(reply, pubkey, 64, 'auth.invalid_signature') ||
-      !timestamp ||
-      !nonce ||
-      !requireHex(reply, signature, 128, 'auth.invalid_signature')
-    ) {
+    if (!requireHex(reply, pubkey, 64, 'auth.invalid_signature')) {
+      metrics.inc('auth.failure', { code: 'auth.invalid_signature' });
+      return;
+    }
+    if (!timestamp || !nonce) {
+      authFail(reply, 'auth.invalid_signature', 'Missing auth headers');
+      return;
+    }
+    if (!requireHex(reply, signature, 128, 'auth.invalid_signature')) {
+      metrics.inc('auth.failure', { code: 'auth.invalid_signature' });
       return;
     }
 
     if (!isLowerHex(nonce) || nonce.length < 32 || nonce.length > 64) {
-      sendError(reply, 401, 'auth.invalid_signature', 'Invalid nonce');
+      authFail(reply, 'auth.invalid_signature', 'Invalid nonce');
       return;
     }
 
     const timestampNumber = Number.parseInt(timestamp, 10);
     if (!Number.isFinite(timestampNumber)) {
-      sendError(reply, 401, 'auth.invalid_signature', 'Invalid timestamp');
+      authFail(reply, 'auth.invalid_signature', 'Invalid timestamp');
       return;
     }
 
     const nowSeconds = Math.floor(Date.now() / 1000);
     if (Math.abs(nowSeconds - timestampNumber) > 60) {
-      sendError(reply, 401, 'auth.timestamp_skew', 'Timestamp skew too large');
+      authFail(reply, 'auth.timestamp_skew', 'Timestamp skew too large');
       return;
     }
 
@@ -236,7 +416,7 @@ export const buildServer = async (databaseUrl?: string) => {
     }
 
     if (!verified) {
-      sendError(reply, 401, 'auth.invalid_signature', 'Invalid signature');
+      authFail(reply, 'auth.invalid_signature', 'Invalid signature');
       return;
     }
 
@@ -258,17 +438,155 @@ export const buildServer = async (databaseUrl?: string) => {
 
     const inserted = Number(insertResult.numInsertedOrUpdatedRows ?? 0);
     if (inserted === 0) {
-      sendError(reply, 401, 'auth.nonce_replay', 'Nonce already used');
+      authFail(reply, 'auth.nonce_replay', 'Nonce already used');
       return;
     }
 
     request.auth = { pubkey };
+
+    if (RATE_LIMIT_ENABLED && isRateLimitedPath(request)) {
+      const strict = isStrictRateLimit(request);
+      const limit = strict ? RATE_LIMIT_STRICT_MAX : RATE_LIMIT_PUBKEY_MAX;
+      const key = `pubkey:${pubkey}:${strict ? 'strict' : 'default'}`;
+      const { allowed, retryAfterSeconds } = takeRateLimit(key, limit);
+      if (!allowed) {
+        reply.header('retry-after', retryAfterSeconds.toString());
+        metrics.inc('rate_limited', {
+          scope: 'pubkey',
+          path: getPath(request),
+          method: request.method
+        });
+        sendError(reply, 429, 'rate_limited', 'Rate limit exceeded', {
+          scope: 'pubkey',
+          limit,
+          window_ms: RATE_LIMIT_WINDOW_MS
+        });
+        return;
+      }
+    }
   };
+
+  const requireIdempotency = async (
+    request: FastifyRequest,
+    reply: FastifyReply
+  ) => {
+    const header = request.headers['idempotency-key'];
+    if (header === undefined) return;
+    const key =
+      typeof header === 'string'
+        ? header.trim()
+        : Array.isArray(header)
+          ? header[0]?.trim()
+          : '';
+    if (!key) {
+      sendError(reply, 400, 'validation_error', 'Idempotency-Key is required');
+      return;
+    }
+    if (key.length > MAX_IDEMPOTENCY_KEY_LEN) {
+      sendError(reply, 400, 'validation_error', 'Idempotency-Key too long', {
+        max_length: MAX_IDEMPOTENCY_KEY_LEN
+      });
+      return;
+    }
+    if (!request.auth || reply.sent) {
+      return;
+    }
+
+    await db
+      .deleteFrom('idempotency_keys')
+      .where(
+        'created_at',
+        '<',
+        new Date(Date.now() - IDEMPOTENCY_TTL_MS)
+      )
+      .execute();
+
+    const target = request.raw.url ?? request.url;
+    const rawBody = request.rawBody ?? Buffer.alloc(0);
+    const requestHash = sha256Hex(
+      Buffer.concat([Buffer.from(`${request.method}\n${target}\n`), rawBody])
+    );
+
+    const insertResult = await db
+      .insertInto('idempotency_keys')
+      .values({
+        pubkey: request.auth.pubkey,
+        idempotency_key: key,
+        request_hash: requestHash,
+        response_status: null,
+        response_body: null,
+        created_at: now()
+      })
+      .onConflict((oc) => oc.columns(['pubkey', 'idempotency_key']).doNothing())
+      .executeTakeFirst();
+
+    const inserted = Number(insertResult.numInsertedOrUpdatedRows ?? 0);
+    if (inserted === 0) {
+      const existing = await db
+        .selectFrom('idempotency_keys')
+        .selectAll()
+        .where('pubkey', '=', request.auth.pubkey)
+        .where('idempotency_key', '=', key)
+        .executeTakeFirst();
+      if (!existing) {
+        sendError(reply, 409, 'idempotency_conflict', 'Idempotency conflict');
+        return;
+      }
+      if (existing.request_hash !== requestHash) {
+        sendError(
+          reply,
+          409,
+          'idempotency_conflict',
+          'Idempotency key already used with different payload'
+        );
+        return;
+      }
+      if (existing.response_status !== null) {
+        reply.header('idempotency-key', key);
+        reply.header('idempotency-replayed', 'true');
+        reply.code(existing.response_status).send(existing.response_body ?? null);
+        return;
+      }
+      sendError(
+        reply,
+        409,
+        'idempotency_in_progress',
+        'Idempotent request is already in progress'
+      );
+      return;
+    }
+
+    request.idempotency = {
+      key,
+      requestHash,
+      pubkey: request.auth.pubkey
+    };
+    reply.header('idempotency-key', key);
+  };
+
+  const authWithIdempotency = [requireAuth, requireIdempotency];
+
+  server.addHook('onSend', async (request, reply, payload) => {
+    const info = request.idempotency;
+    if (!info) return payload;
+    const responseBody = parseResponsePayload(payload);
+    await db
+      .updateTable('idempotency_keys')
+      .set({
+        response_status: reply.statusCode,
+        response_body: responseBody
+      })
+      .where('pubkey', '=', info.pubkey)
+      .where('idempotency_key', '=', info.key)
+      .execute();
+    return payload;
+  });
 
   server.get(
     '/ws/seller',
     { websocket: true },
     (socket) => {
+      metrics.inc('ws.connect');
       const nonce = randomBytes(16).toString('hex');
       const expiresAt = new Date(Date.now() + WS_CHALLENGE_TTL_MS);
 
@@ -279,6 +597,7 @@ export const buildServer = async (databaseUrl?: string) => {
       };
 
       const sendWsError = (code: string, message: string) => {
+        metrics.inc('ws.auth_error', { code });
         sendWs({ type: 'error', code, message });
         socket.close();
       };
@@ -381,6 +700,8 @@ export const buildServer = async (databaseUrl?: string) => {
         authed = true;
         clearTimeout(expiryTimer);
         addOnlineSeller(pubkey, socket);
+        metrics.inc('ws.auth_ok');
+        server.log.info({ seller_pubkey: pubkey }, 'ws.auth_ok');
         sendWs({ type: 'auth.ok', seller_pubkey: pubkey });
       });
 
@@ -467,6 +788,34 @@ export const buildServer = async (databaseUrl?: string) => {
       .returningAll()
       .executeTakeFirst();
 
+  const recordJobTransition = (
+    request: FastifyRequest,
+    job: {
+      job_id: string;
+      seller_pubkey: string;
+      buyer_pubkey: string;
+    },
+    fromStatus: JobStatus | null,
+    toStatus: JobStatus
+  ) => {
+    if (fromStatus === toStatus) return;
+    metrics.inc('job.transition', {
+      from: fromStatus ?? 'none',
+      to: toStatus
+    });
+    request.log.info(
+      {
+        request_id: request.id,
+        job_id: job.job_id,
+        seller_pubkey: job.seller_pubkey,
+        buyer_pubkey: job.buyer_pubkey,
+        from_status: fromStatus,
+        to_status: toStatus
+      },
+      'job.transition'
+    );
+  };
+
   server.get(
     '/health',
     {
@@ -485,9 +834,11 @@ export const buildServer = async (databaseUrl?: string) => {
     async () => ({ ok: true })
   );
 
+  server.get('/metrics', async () => metrics.snapshot());
+
   server.post(
     '/v1/offers',
-    { preHandler: requireAuth },
+    { preHandler: authWithIdempotency },
     async (request, reply) => {
       if (!request.auth) return;
       const parsed = OfferCreateSchema.safeParse(request.body);
@@ -633,7 +984,7 @@ export const buildServer = async (databaseUrl?: string) => {
 
   server.post(
     '/v1/jobs',
-    { preHandler: requireAuth },
+    { preHandler: authWithIdempotency },
     async (request, reply) => {
       if (!request.auth) return;
       const parsed = JobCreateSchema.safeParse(request.body);
@@ -685,6 +1036,9 @@ export const buildServer = async (databaseUrl?: string) => {
         .returningAll()
         .executeTakeFirst();
       sendHint(offer.seller_pubkey);
+      if (job) {
+        recordJobTransition(request, job, null, job.status);
+      }
       reply.code(201).send({ job });
     }
   );
@@ -815,7 +1169,7 @@ export const buildServer = async (databaseUrl?: string) => {
 
   server.post(
     '/v1/jobs/:id/quote',
-    { preHandler: requireAuth },
+    { preHandler: authWithIdempotency },
     async (request, reply) => {
       if (!request.auth) return;
       const jobId = (request.params as { id: string }).id;
@@ -862,13 +1216,16 @@ export const buildServer = async (databaseUrl?: string) => {
         .where('job_id', '=', jobId)
         .returningAll()
         .executeTakeFirst();
+      if (updated) {
+        recordJobTransition(request, updated, job.status, updated.status);
+      }
       reply.send({ job: updated });
     }
   );
 
   server.post(
     '/v1/jobs/:id/accept',
-    { preHandler: requireAuth },
+    { preHandler: authWithIdempotency },
     async (request, reply) => {
       if (!request.auth) return;
       const jobId = (request.params as { id: string }).id;
@@ -883,7 +1240,10 @@ export const buildServer = async (databaseUrl?: string) => {
         return;
       }
       if (!job.quote_expires_at || job.quote_expires_at.getTime() <= Date.now()) {
-        await updateJobStatus(jobId, 'expired');
+        const expiredJob = await updateJobStatus(jobId, 'expired');
+        if (expiredJob) {
+          recordJobTransition(request, expiredJob, job.status, expiredJob.status);
+        }
         sendError(reply, 409, 'invalid_state', 'Quote expired');
         return;
       }
@@ -895,13 +1255,16 @@ export const buildServer = async (databaseUrl?: string) => {
         .returningAll()
         .executeTakeFirst();
       sendHint(job.seller_pubkey);
+      if (updated) {
+        recordJobTransition(request, updated, job.status, updated.status);
+      }
       reply.send({ job: updated });
     }
   );
 
   server.post(
     '/v1/jobs/:id/payment',
-    { preHandler: requireAuth },
+    { preHandler: authWithIdempotency },
     async (request, reply) => {
       if (!request.auth) return;
       const jobId = (request.params as { id: string }).id;
@@ -940,7 +1303,7 @@ export const buildServer = async (databaseUrl?: string) => {
 
   server.post(
     '/v1/jobs/:id/lock',
-    { preHandler: requireAuth },
+    { preHandler: authWithIdempotency },
     async (request, reply) => {
       if (!request.auth) return;
       const jobId = (request.params as { id: string }).id;
@@ -979,13 +1342,16 @@ export const buildServer = async (databaseUrl?: string) => {
         .where('job_id', '=', jobId)
         .returningAll()
         .executeTakeFirst();
+      if (updated) {
+        recordJobTransition(request, updated, job.status, updated.status);
+      }
       reply.send({ job: updated });
     }
   );
 
   server.post(
     '/v1/jobs/:id/deliver',
-    { preHandler: requireAuth },
+    { preHandler: authWithIdempotency },
     async (request, reply) => {
       if (!request.auth) return;
       const jobId = (request.params as { id: string }).id;
@@ -1053,13 +1419,16 @@ export const buildServer = async (databaseUrl?: string) => {
         .where('job_id', '=', jobId)
         .returningAll()
         .executeTakeFirst();
+      if (updated) {
+        recordJobTransition(request, updated, job.status, updated.status);
+      }
       reply.send({ job: updated });
     }
   );
 
   server.post(
     '/v1/jobs/:id/cancel',
-    { preHandler: requireAuth },
+    { preHandler: authWithIdempotency },
     async (request, reply) => {
       if (!request.auth) return;
       const jobId = (request.params as { id: string }).id;
@@ -1087,6 +1456,9 @@ export const buildServer = async (databaseUrl?: string) => {
         .where('job_id', '=', jobId)
         .returningAll()
         .executeTakeFirst();
+      if (updated) {
+        recordJobTransition(request, updated, job.status, updated.status);
+      }
       reply.send({ job: updated });
     }
   );

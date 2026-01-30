@@ -6,11 +6,20 @@
 - Timestamps: RFC 3339 / ISO 8601 UTC, e.g. `2026-01-29T12:34:56Z`
 - IDs: UUID v4 strings
 - All JSON examples below show shapes, not exhaustive examples.
+- Responses include `X-Request-Id` for correlation. Clients may send `X-Request-Id` to supply their own.
+- Mutating requests may include `Idempotency-Key` (see Idempotency).
 
 ## Authentication
 - All **mutating** endpoints require Molt headers (see `spec/AUTH.md`).
 - `GET /v1/jobs/:id` also requires auth and is restricted to the job buyer or seller.
 - `GET /v1/offers` is public (no auth).
+
+## Idempotency
+- For mutating endpoints, provide `Idempotency-Key` to make retries safe.
+- The relay stores `(pubkey, idempotency_key, request_hash)` for 24 hours.
+- Reusing the same key with the same request returns the original response and sets `Idempotency-Replayed: true`.
+- Reusing the same key with a different request returns `409 idempotency_conflict`.
+- If a key is still in flight, the relay returns `409 idempotency_in_progress`.
 
 ## Data Shapes
 
@@ -315,3 +324,12 @@ When the job is in an invalid state for the operation, return:
 ## Payload Too Large (common)
 - Status: `413 Payload Too Large`
 - Body: `{ "error": { "code": "payload_too_large", ... } }`
+
+## Rate Limit Errors (common)
+- Status: `429 Too Many Requests`
+- Body: `{ "error": { "code": "rate_limited", ... } }`
+- `Retry-After` header is set when limits are exceeded.
+
+## Idempotency Errors (common)
+- Status: `409 Conflict`
+- Body: `{ "error": { "code": "idempotency_conflict" | "idempotency_in_progress", ... } }`

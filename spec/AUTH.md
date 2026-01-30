@@ -20,8 +20,8 @@ SHA256_HEX(BODY)
 Definitions:
 - `METHOD`: upper-case HTTP method (e.g. `POST`)
 - `PATH_WITH_QUERY`: exact request-target path and query as sent on the wire
-  - Example: `/jobs/123?foo=bar&x=1`
-  - If no query, use the path only (e.g. `/offers`)
+  - Example: `/v1/jobs/123?foo=bar&x=1`
+  - If no query, use the path only (e.g. `/v1/offers`)
   - Do not include scheme or host
 - `TIMESTAMP`: value from `X-Molt-Timestamp`
 - `NONCE`: value from `X-Molt-Nonce`

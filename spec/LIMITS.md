@@ -15,8 +15,20 @@
 - `payment_tx_hash`: max 128 chars
 
 ## Rate Limits
-- None enforced at the application layer in v0.
-- Deployments may apply coarse IP-based throttles for abuse protection (not part of this spec).
+- Token bucket per IP **and** per pubkey.
+- Defaults (per 60s window):
+  - IP: 120 requests/minute
+  - Pubkey: 60 requests/minute
+  - **Strict**: 30 requests/minute for `POST /v1/jobs` and `POST /v1/offers`
+- Set `RELAY_RATE_LIMIT_ENABLED=false` to disable. Override limits with:
+  - `RELAY_RATE_LIMIT_WINDOW_MS`
+  - `RELAY_RATE_LIMIT_IP_MAX`
+  - `RELAY_RATE_LIMIT_PUBKEY_MAX`
+  - `RELAY_RATE_LIMIT_STRICT_MAX`
+
+## Idempotency
+- `Idempotency-Key` header max length: 128 characters
+- Stored for 24 hours (TTL) to prevent replays
 
 ## TTL Decisions
 - Auth timestamp skew: +/- 60 seconds
@@ -24,7 +36,8 @@
 - WS auth challenge TTL: 30 seconds
 - Quote TTL: default 15 minutes if not provided; max 60 minutes
 - Accept-to-payment TTL: 30 minutes after transition to `accepted`
-- Lock TTL: 5 minutes; `/jobs/:id/lock` by the same seller extends the lock
+- Lock TTL: 5 minutes; `/v1/jobs/:id/lock` by the same seller extends the lock
+- Idempotency key TTL: 24 hours
 
 ## Expiry Rules
 - If `quote_expires_at` elapses before acceptance, job transitions to `expired`.

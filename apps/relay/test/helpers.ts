@@ -51,6 +51,7 @@ export const authHeaders = ({
 };
 
 export const truncateAll = async (server: FastifyInstance) => {
+  await server.db.deleteFrom('idempotency_keys').execute();
   await server.db.deleteFrom('nonces').execute();
   await server.db.deleteFrom('jobs').execute();
   await server.db.deleteFrom('offers').execute();

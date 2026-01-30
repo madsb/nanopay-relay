@@ -56,7 +56,7 @@ Unknown message types result in `type: "error"` and the connection is closed.
 ```
 { "type": "hint.new_job" }
 ```
-- No job payload is included. Seller must poll `GET /jobs/:id` or scan for `requested` jobs via existing offers.
+- No job payload is included. Seller must poll `GET /v1/jobs/:id` or scan for `requested` jobs via existing offers.
 
 ## Keepalive
 - Standard WebSocket ping/pong frames may be used by either side.

@@ -15,7 +15,8 @@ describe('relay api', () => {
     body,
     keypair,
     nonce,
-    timestamp
+    timestamp,
+    idempotencyKey
   }: {
     method: string;
     url: string;
@@ -23,6 +24,7 @@ describe('relay api', () => {
     keypair: ReturnType<typeof createKeypair>;
     nonce?: string;
     timestamp?: string;
+    idempotencyKey?: string;
   }) => {
     const payload = body === undefined ? undefined : json(body);
     const rawBody = payload ? Buffer.from(payload) : Buffer.alloc(0);
@@ -37,6 +39,9 @@ describe('relay api', () => {
 
     if (payload) {
       headers['content-type'] = 'application/json';
+    }
+    if (idempotencyKey) {
+      headers['idempotency-key'] = idempotencyKey;
     }
 
     return server.inject({
@@ -192,6 +197,67 @@ describe('relay api', () => {
     expect(JSON.parse(getRes.body).job.result_payload).toEqual({
       markdown: '# Hello'
     });
+  });
+
+  it('replays idempotent requests and rejects conflicts', async () => {
+    const offerPayload = {
+      title: 'Idempotent Offer',
+      description: 'Idempotency test',
+      tags: ['idempotency'],
+      pricing_mode: 'fixed',
+      fixed_price_raw: '1000',
+      active: true
+    };
+
+    const offerRes = await signedInject({
+      method: 'POST',
+      url: '/v1/offers',
+      body: offerPayload,
+      keypair: seller
+    });
+    expect(offerRes.statusCode).toBe(201);
+    const offer = JSON.parse(offerRes.body).offer;
+
+    const jobBody = {
+      offer_id: offer.offer_id,
+      request_payload: { url: 'https://example.com/idempotent' }
+    };
+
+    const idemKey = 'job-create-1';
+    const first = await signedInject({
+      method: 'POST',
+      url: '/v1/jobs',
+      body: jobBody,
+      keypair: buyer,
+      idempotencyKey: idemKey
+    });
+    expect(first.statusCode).toBe(201);
+    const job1 = JSON.parse(first.body).job;
+
+    const second = await signedInject({
+      method: 'POST',
+      url: '/v1/jobs',
+      body: jobBody,
+      keypair: buyer,
+      idempotencyKey: idemKey
+    });
+    expect(second.statusCode).toBe(201);
+    expect(second.headers['idempotency-replayed']).toBe('true');
+    const job2 = JSON.parse(second.body).job;
+    expect(job2.job_id).toBe(job1.job_id);
+
+    const conflict = await signedInject({
+      method: 'POST',
+      url: '/v1/jobs',
+      body: {
+        offer_id: offer.offer_id,
+        request_payload: { url: 'https://example.com/different' }
+      },
+      keypair: buyer,
+      idempotencyKey: idemKey
+    });
+    expect(conflict.statusCode).toBe(409);
+    expect(JSON.parse(conflict.body).error.code).toBe('idempotency_conflict');
   });
 
   it('enforces request_payload size limits', async () => {
