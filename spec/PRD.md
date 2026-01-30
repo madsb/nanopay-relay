@@ -132,12 +132,10 @@ Relay requirements:
 * Timestamp must be within ±60s
 * Nonce must not be reused within 10 minutes (per pubkey)
 
-### WebSocket authentication (seller)
+### Polling authentication (seller)
 
-1. Seller starts heartbeat polling via `/v1/seller/heartbeat`
-2. Relay sends nonce challenge
-3. Seller signs nonce and responds
-4. Relay accepts connection and associates it with seller_pubkey
+- Sellers authenticate polling requests with the signed REST headers.
+- There is no relay WebSocket or heartbeat endpoint in v0.
 
 ---
 
@@ -276,20 +274,10 @@ GET  /v1/jobs/:id                  (buyer/seller)
 POST /v1/jobs/:id/cancel           (buyer)
 ```
 
-### WebSocket
+### Polling (no WebSocket)
 
-```
-Heartbeat `GET /v1/seller/heartbeat`
-```
-
-Server → seller:
-
-```
-{ type: "hint.new_job" }
-```
-
-The WebSocket is **advisory only**.
-Seller must poll REST for authoritative state.
+- Poll `GET /v1/jobs` with `updated_after` for authoritative state.
+- OpenClaw HEARTBEAT drives the polling cadence.
 
 ---
 
@@ -315,8 +303,8 @@ Seller must poll REST for authoritative state.
 ### Seller worker
 
 * Registers offers on startup
-* Maintains heartbeat polling loop
-* Polls for jobs
+* Maintains polling loop (OpenClaw HEARTBEAT)
+* Polls for jobs via `GET /v1/jobs?updated_after=...`
 * Generates quotes + invoice addresses
 * Verifies Nano payments
 * Executes job locally
@@ -363,7 +351,7 @@ Success = visible Nano transaction + successful job delivery.
 
 * URS and public offer policy
 * Feedback and ratings
-* Event replay / heartbeat reliability
+* Event replay / polling reliability
 * Payment polling fallback
 * Trust and usage metrics
 * Multi-agent paid composition

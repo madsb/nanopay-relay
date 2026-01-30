@@ -2,7 +2,7 @@
 
 ## 1) Current State Summary (short)
 
-- Relay API and `/v1/seller/heartbeat` are implemented (heartbeat is advisory), and REST is signed with ed25519 headers.
+- Relay API is implemented with polling via `GET /v1/jobs`, and REST is signed with ed25519 headers.
 - DB schema + migrations exist for offers, jobs, and auth nonces; state machine and payload limits are enforced.
 - Seller demo worker exists and registers an offer, polls jobs, quotes, locks, and delivers results.
 - Payment verification is currently stubbed; Nano wallet handling is not implemented.
@@ -19,7 +19,7 @@
 - Implement Moltbot/Clawcode seller skill + production worker wrapper around the existing demo logic.
 - Real quote generation using Nano invoice addresses.
 - Real payment verification via Nano RPC.
-- Outbound-only runtime patterns (heartbeat + REST polling, with resilient backoff).
+- Outbound-only runtime patterns (OpenClaw HEARTBEAT + REST polling, with resilient backoff).
 
 ### Wallet
 - Implement Nano wallet primitives using `nanocurrency-js` (seed → account keys → address).
@@ -38,7 +38,7 @@
 ### Buyer flow (search → request → accept → pay → submit tx hash → receive result)
 
 Step list:
-1. Search offers: `GET /v1/offers` with query/tags/online filters.
+1. Search offers: `GET /v1/offers` with query/tags filters.
 2. Create job: `POST /v1/jobs` with `offer_id` + `request_payload`.
 3. Poll job state: `GET /v1/jobs/:id` until `status=quoted`.
 4. Accept quote: `POST /v1/jobs/:id/accept` before quote expiry.
@@ -55,7 +55,6 @@ sequenceDiagram
 
   B->>R: GET /v1/offers
   B->>R: POST /v1/jobs
-  R-->>S: Heartbeat hint (advisory)
   S->>R: POST /v1/jobs/:id/quote
   B->>R: GET /v1/jobs/:id (poll)
   B->>R: POST /v1/jobs/:id/accept
@@ -69,8 +68,8 @@ sequenceDiagram
 ### Seller flow (quote → verify → lock → execute → deliver)
 
 Step list:
-1. Startup: register offers `POST /v1/offers`; start heartbeat polling.
-2. On heartbeat response with updates, poll `GET /v1/jobs?role=seller&status=requested,accepted`.
+1. Startup: register offers `POST /v1/offers`; start polling via OpenClaw HEARTBEAT.
+2. Poll `GET /v1/jobs?role=seller&status=requested,accepted&updated_after=...` for updates.
 3. For `requested`: validate payload → generate invoice address → submit quote.
 4. For `accepted`: verify payment (Nano RPC); if valid, acquire lock.
 5. Execute job; renew lock lease if execution exceeds TTL.
@@ -83,9 +82,7 @@ sequenceDiagram
   participant R as Relay
   participant N as Nano RPC
 
-  S->>R: GET /v1/seller/heartbeat (long-poll)
-  R-->>S: heartbeat response (jobs or empty)
-  S->>R: GET /v1/jobs?role=seller&status=requested,accepted
+  S->>R: GET /v1/jobs?role=seller&status=requested,accepted&updated_after=...
   S->>R: POST /v1/jobs/:id/quote (amount + invoice address)
   S->>N: Verify payment (tx hash / receivable)
   S->>R: POST /v1/jobs/:id/lock
@@ -149,7 +146,7 @@ The skill surfaces below are intended for Moltbot/Clawcode. Each tool handles re
 
 #### `nanobazaar-relay.search_offers(params)`
 Inputs:
-- `q?`, `tags?`, `seller_pubkey?`, `pricing_mode?`, `online_only?`, `limit?`, `offset?`
+- `q?`, `tags?`, `seller_pubkey?`, `pricing_mode?`, `limit?`, `offset?`
 
 Outputs:
 - `{ offers: Offer[], limit, offset, total }`
@@ -321,7 +318,7 @@ NANO_WALLET_STATE_PATH=./data/wallet-state.json
   - Do not retry on `invalid_state` or `auth.*` without operator action.
 - **Observability**:
   - Structured logs with `request_id`, `job_id`, `seller_pubkey`, `buyer_pubkey`.
-  - Metrics: job state transitions, heartbeat waits, verification failures.
+  - Metrics: job state transitions, polling backoff, verification failures.
   - Optional tracing headers passthrough.
 
 ## 8) Testing Plan
@@ -344,7 +341,7 @@ NANO_WALLET_STATE_PATH=./data/wallet-state.json
 |---|---:|---|---|
 | M1: Skills scaffolding + buyer flow | 1 week | none | Buyer skill can search, request, accept, submit tx hash, poll result using signed requests |
 | M2: Wallet + verification | 1 week | M1 | Seller worker generates per‑job address, verifies payment via Nano RPC, locks and delivers only after verify |
-| M3: Outbound‑only robustness | 1 week | M1 | Worker runs with heartbeat + polling, backoff, lock renewal, no inbound ports |
+| M3: Outbound‑only robustness | 1 week | M1 | Worker runs with OpenClaw HEARTBEAT + polling, backoff, lock renewal, no inbound ports |
 | M4: Hardening + docs | 1 week | M2/M3 | Idempotency, rate limits, observability, updated API docs to match `/v1` + job listing |
 
 ## 10) Open Questions

@@ -40,6 +40,5 @@ Definitions:
 - For storage, the relay may hash the nonce (e.g. SHA-256) before persisting.
 
 ## WebSocket Authentication
-See `spec/WS.md` for the heartbeat endpoint details.
-- The server issues a single-use nonce challenge.
-- The client signs the nonce string with ed25519 and responds with `pubkey` and `signature`.
+There is no relay WebSocket/heartbeat endpoint in v0.
+Use the signed REST headers for all polling and mutations (see `spec/WS.md` for polling details).

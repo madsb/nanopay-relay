@@ -145,10 +145,6 @@ type JobListResponse = {
   total: number;
 };
 
-type HeartbeatResponse = JobListResponse & {
-  waited_ms?: number;
-};
-
 const listJobs = async (options: {
   updatedAfter?: string | null;
   statuses?: string;
@@ -168,27 +164,6 @@ const listJobs = async (options: {
   return apiRequest<JobListResponse>('GET', path);
 };
 
-const heartbeat = async (options: {
-  updatedAfter?: string | null;
-  statuses?: string;
-  waitMs?: number;
-  limit?: number;
-  offset?: number;
-}) => {
-  const params = new URLSearchParams({
-    status: options.statuses ?? 'requested,accepted,running',
-    limit: String(options.limit ?? 1),
-    offset: String(options.offset ?? 0)
-  });
-  if (options.updatedAfter) {
-    params.set('updated_after', options.updatedAfter);
-  }
-  if (options.waitMs && options.waitMs > 0) {
-    params.set('wait_ms', String(options.waitMs));
-  }
-  const path = `/v1/seller/heartbeat?${params.toString()}`;
-  return apiRequest<HeartbeatResponse>('GET', path);
-};
 
 const loadChargeMappings = async () => {
   const map = await readChargeMap();
@@ -340,7 +315,7 @@ const lockLostJobs = new Set<string>();
 let polling = false;
 let lastUpdatedAt: string | null = null;
 let initialSyncDone = false;
-let heartbeatWaitMs = pollIntervalMs;
+let pollWaitMs = pollIntervalMs;
 
 const isTrackedStatus = (status: string) =>
   status === 'requested' || status === 'accepted' || status === 'running';
@@ -450,6 +425,7 @@ const fetchUpdates = async () => {
     (initialSyncDone ? null : '1970-01-01T00:00:00.000Z');
   let offset = 0;
   let maxUpdated: string | null = lastUpdatedAt;
+  let hadUpdates = false;
   while (true) {
     const response = await listJobs({
       updatedAfter: cursor ?? undefined,
@@ -458,9 +434,10 @@ const fetchUpdates = async () => {
     });
     if (response.status !== 200 || !response.data) {
       console.error('Failed to list jobs', response.status, response.data);
-      return false;
+      return { ok: false, hadUpdates: false };
     }
     if (response.data.jobs.length === 0) break;
+    hadUpdates = true;
     for (const job of response.data.jobs) {
       updateTrackedJob(job);
       maxUpdated = maxTimestamp(maxUpdated, job.updated_at);
@@ -473,7 +450,7 @@ const fetchUpdates = async () => {
   if (maxUpdated) {
     lastUpdatedAt = maxUpdated;
   }
-  return true;
+  return { ok: true, hadUpdates };
 };
 
 const getOrCreateDelivery = async (job: Job): Promise<DeliveryPayload> => {
@@ -613,33 +590,19 @@ const processTrackedJobs = async () => {
 const isActiveWorker = () =>
   trackedJobs.size > 0 || inFlightJobs.size > 0 || lockLostJobs.size > 0;
 
-const computeHeartbeatWaitMs = () => {
+const computePollWaitMs = () => {
   const jitter = pollJitterMs > 0 ? Math.floor(Math.random() * pollJitterMs) : 0;
-  return Math.max(pollIntervalMs, heartbeatWaitMs + jitter);
+  return Math.max(pollIntervalMs, pollWaitMs + jitter);
 };
 
-const heartbeatOnce = async (waitMs: number) => {
-  const cursor = getCursorTimestamp();
-  const response = await heartbeat({
-    updatedAfter: cursor ?? undefined,
-    waitMs,
-    limit: 1
-  });
-  if (response.status !== 200 || !response.data) {
-    console.error('Heartbeat failed', response.status, response.data);
-    return null;
-  }
-  return response.data.jobs.length > 0;
-};
-
-const adjustHeartbeatWait = (hadUpdates: boolean) => {
+const adjustPollWait = (hadUpdates: boolean) => {
   if (hadUpdates || isActiveWorker()) {
-    heartbeatWaitMs = pollIntervalMs;
+    pollWaitMs = pollIntervalMs;
     return;
   }
-  heartbeatWaitMs = Math.min(
+  pollWaitMs = Math.min(
     pollMaxIntervalMs,
-    Math.max(pollIntervalMs, Math.floor(heartbeatWaitMs * 1.5))
+    Math.max(pollIntervalMs, Math.floor(pollWaitMs * 1.5))
   );
 };
 
@@ -648,25 +611,26 @@ const pollOnce = async () => {
   polling = true;
   try {
     if (!initialSyncDone) {
-      await syncTrackedJobs();
-      await fetchUpdates();
+      const synced = await syncTrackedJobs();
+      if (!synced) {
+        await delay(pollIntervalMs);
+        pollWaitMs = pollIntervalMs;
+        return;
+      }
     }
-    await processTrackedJobs();
-    const waitMs = computeHeartbeatWaitMs();
-    const hadUpdates = await heartbeatOnce(waitMs);
-    if (hadUpdates === null) {
+    const updateRes = await fetchUpdates();
+    if (!updateRes.ok) {
       await delay(pollIntervalMs);
-      heartbeatWaitMs = pollIntervalMs;
+      pollWaitMs = pollIntervalMs;
       return;
     }
-    if (hadUpdates) {
-      await fetchUpdates();
-      await processTrackedJobs();
-    }
-    adjustHeartbeatWait(hadUpdates);
+    await processTrackedJobs();
+    adjustPollWait(updateRes.hadUpdates);
+    await delay(computePollWaitMs());
   } catch (error) {
     console.error('Polling error', error);
-    heartbeatWaitMs = pollIntervalMs;
+    pollWaitMs = pollIntervalMs;
+    await delay(pollIntervalMs);
   } finally {
     polling = false;
   }

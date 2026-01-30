@@ -97,3 +97,4 @@ pnpm exec tsx {baseDir}/scripts/charge-status.mjs --job-id <job_id>
 - Use `quote-job-auto` to generate a BerryPay charge and quote with its address.
 - `charge-create` and `charge-status` store and read the persistent job → charge mapping.
 - The relay does **not** store result payloads. The seller must upload the result and provide a URL.
+- Polling is driven by OpenClaw HEARTBEAT (no relay heartbeat endpoint).

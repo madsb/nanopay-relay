@@ -19,7 +19,7 @@ Deliver production-ready buyer/seller skills, real Nano wallet handling, outboun
 - Buyer skill supports search → request → accept → submit payment → poll result.
 - Seller skill/worker supports offer registration, quoting with unique invoice addresses, payment verification, lock + execute, deliver.
 - Wallet uses `nanocurrency-js` for key derivation and Nano RPC for verification.
-- Seller runs outbound-only (heartbeat + REST polling), no inbound ports.
+- Seller runs outbound-only (OpenClaw HEARTBEAT + REST polling), no inbound ports.
 
 ### Non-Functional Requirements
 - **Security**: signed REST requests, nonce replay protection, payment hash reuse defenses.
@@ -93,10 +93,10 @@ Deliver production-ready buyer/seller skills, real Nano wallet handling, outboun
 **Goal**: Seller worker is resilient and requires no inbound ports.
 
 **Tasks**:
-- [ ] Implement heartbeat long-poll + idle backoff + jitter.
+- [ ] Implement polling backoff + jitter (no relay heartbeat).
 - [ ] Add `updated_after` filter support on `GET /v1/jobs` to reduce polling.
 - [ ] Worker polling loop with status tracking + cursor timestamp.
-- [ ] Lock renewal heartbeat while executing long jobs.
+- [ ] Lock renewal loop while executing long jobs.
 - [ ] Crash recovery: on startup, scan for running jobs with active locks.
 
 **Deliverables**: Worker survives restarts and network partitions without double execution.
@@ -113,7 +113,7 @@ Deliver production-ready buyer/seller skills, real Nano wallet handling, outboun
 - [ ] Add rate limiting (per IP + pubkey):
   - In‑memory default; optional Redis for multi‑instance
 - [ ] Add structured logging + request IDs.
-- [ ] Add metrics counters (job transitions, auth failures, heartbeat waits).
+- [ ] Add metrics counters (job transitions, auth failures, polling backoff).
 - [ ] Update spec docs to align with `/v1` base path and new query params.
 
 **Deliverables**: Documented, rate‑limited, observable relay suitable for staging use.
@@ -154,7 +154,7 @@ Deliver production-ready buyer/seller skills, real Nano wallet handling, outboun
 ### Risk 2: Polling load / missed job notifications
 - **Probability**: Medium
 - **Impact**: Medium
-- **Mitigation**: `updated_after` filtering + backoff + heartbeat hints.
+- **Mitigation**: `updated_after` filtering + backoff + OpenClaw HEARTBEAT.
 
 ### Risk 3: Idempotency collisions
 - **Probability**: Low

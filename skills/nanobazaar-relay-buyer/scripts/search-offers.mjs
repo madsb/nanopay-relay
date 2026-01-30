@@ -19,7 +19,6 @@ const params = {
   seller_pubkey: typeof args['seller-pubkey'] === 'string' ? args['seller-pubkey'] : undefined,
   pricing_mode: typeof args['pricing-mode'] === 'string' ? args['pricing-mode'] : undefined,
   active: parseBool(args.active),
-  online_only: parseBool(args['online-only']),
   limit: parseNumber(args.limit),
   offset: parseNumber(args.offset)
 };

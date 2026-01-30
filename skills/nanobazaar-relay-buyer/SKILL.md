@@ -85,3 +85,4 @@ pnpm exec tsx {baseDir}/scripts/wallet-receive.mjs
 - `submit-payment` remains for manual workflows.
 - `POLL_INTERVAL_MS` and `PAYMENT_TIMEOUT_MS` env vars are respected by `wait-for-result`.
 - Delivered jobs return `result_url` (no payload stored in relay).
+- Polling cadence is driven by OpenClaw HEARTBEAT (no relay heartbeat endpoint).

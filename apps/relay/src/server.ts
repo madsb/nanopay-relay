@@ -32,7 +32,6 @@ const MAX_IDEMPOTENCY_KEY_LEN = 128;
 const QUOTE_TTL_MS = 15 * 60 * 1000;
 const MAX_QUOTE_TTL_MS = 60 * 60 * 1000;
 const LOCK_TTL_MS = 5 * 60 * 1000;
-const HEARTBEAT_MAX_WAIT_MS = parseEnvInt('RELAY_HEARTBEAT_MAX_WAIT_MS', 30_000);
 const IDEMPOTENCY_TTL_MS = 24 * 60 * 60 * 1000;
 
 const RATE_LIMIT_WINDOW_MS = parseEnvInt('RELAY_RATE_LIMIT_WINDOW_MS', 60_000);
@@ -231,48 +230,6 @@ export const buildServer = async (databaseUrl?: string) => {
     rateBuckets.set(key, existing);
     return { allowed: true, retryAfterSeconds: 0 };
   };
-  const sellerHeartbeatWaiters = new Map<string, Set<() => void>>();
-
-  const notifySeller = (sellerPubkey: string) => {
-    const waiters = sellerHeartbeatWaiters.get(sellerPubkey);
-    if (!waiters || waiters.size === 0) return;
-    for (const waiter of Array.from(waiters)) {
-      try {
-        waiter();
-      } catch {
-        // ignore waiter failures; cleanup is handled by waiters
-      }
-    }
-  };
-
-  const waitForSellerUpdate = (sellerPubkey: string, timeoutMs: number) => {
-    if (timeoutMs <= 0) {
-      return Promise.resolve('timeout' as const);
-    }
-    return new Promise<'notified' | 'timeout'>((resolve) => {
-      const waiters =
-        sellerHeartbeatWaiters.get(sellerPubkey) ?? new Set<() => void>();
-      sellerHeartbeatWaiters.set(sellerPubkey, waiters);
-      let settled = false;
-      let timer: NodeJS.Timeout | null = null;
-
-      const cleanup = (result: 'notified' | 'timeout') => {
-        if (settled) return;
-        settled = true;
-        if (timer) clearTimeout(timer);
-        waiters.delete(onNotify);
-        if (waiters.size === 0) {
-          sellerHeartbeatWaiters.delete(sellerPubkey);
-        }
-        resolve(result);
-      };
-
-      const onNotify = () => cleanup('notified');
-      waiters.add(onNotify);
-      timer = setTimeout(() => cleanup('timeout'), timeoutMs);
-    });
-  };
-
   const db = createDb(
     databaseUrl ??
       process.env.DATABASE_URL ??
@@ -721,7 +678,6 @@ export const buildServer = async (databaseUrl?: string) => {
       .returningAll()
       .executeTakeFirst();
 
-
   const recordJobTransition = (
     request: FastifyRequest,
     job: {
@@ -737,7 +693,6 @@ export const buildServer = async (databaseUrl?: string) => {
       from: fromStatus ?? 'none',
       to: toStatus
     });
-    notifySeller(job.seller_pubkey);
     request.log.info(
       {
         request_id: request.id,
@@ -810,7 +765,6 @@ export const buildServer = async (databaseUrl?: string) => {
     const sellerPubkey = query.seller_pubkey?.trim();
     const pricingMode = query.pricing_mode?.trim();
     const activeParam = query.active?.trim();
-    const onlineOnlyParam = query.online_only?.trim();
     const limitParam = query.limit?.trim();
     const offsetParam = query.offset?.trim();
 
@@ -832,16 +786,6 @@ export const buildServer = async (databaseUrl?: string) => {
       else if (activeParam === 'false') active = false;
       else {
         sendError(reply, 400, 'validation_error', 'Invalid active flag');
-        return;
-      }
-    }
-
-    let onlineOnly = false;
-    if (onlineOnlyParam !== undefined) {
-      if (onlineOnlyParam === 'true') onlineOnly = true;
-      else if (onlineOnlyParam === 'false') onlineOnly = false;
-      else {
-        sendError(reply, 400, 'validation_error', 'Invalid online_only flag');
         return;
       }
     }
@@ -895,15 +839,6 @@ export const buildServer = async (databaseUrl?: string) => {
     } else {
       base = base.where('active', '=', true);
     }
-    if (onlineOnly) {
-      const onlineKeys = Array.from(onlineSellers.keys());
-      if (onlineKeys.length === 0) {
-        reply.send({ offers: [], limit, offset, total: 0 });
-        return;
-      }
-      base = base.where('seller_pubkey', 'in', onlineKeys);
-    }
-
     const totalRow = await base
       .select((eb) => eb.fn.countAll().as('count'))
       .executeTakeFirst();
@@ -982,131 +917,6 @@ export const buildServer = async (databaseUrl?: string) => {
         recordJobTransition(request, job, null, job.status);
       }
       reply.code(201).send({ job });
-    }
-  );
-
-  server.get(
-    '/v1/seller/heartbeat',
-    { preHandler: requireAuth },
-    async (request, reply) => {
-      if (!request.auth) return;
-      metrics.inc('heartbeat.request');
-      const query = request.query as Record<string, string | undefined>;
-      const statusParam = query.status?.trim();
-      const limitParam = query.limit?.trim();
-      const offsetParam = query.offset?.trim();
-      const updatedAfterParam = query.updated_after?.trim();
-      const waitParam = query.wait_ms?.trim();
-
-      const limit = limitParam ? Number.parseInt(limitParam, 10) : 50;
-      const offset = offsetParam ? Number.parseInt(offsetParam, 10) : 0;
-
-      if (!Number.isFinite(limit) || limit < 1 || limit > 100) {
-        sendError(reply, 400, 'validation_error', 'Invalid limit');
-        return;
-      }
-      if (!Number.isFinite(offset) || offset < 0) {
-        sendError(reply, 400, 'validation_error', 'Invalid offset');
-        return;
-      }
-
-      let waitMs = waitParam ? Number.parseInt(waitParam, 10) : 0;
-      if (!Number.isFinite(waitMs) || waitMs < 0) {
-        sendError(reply, 400, 'validation_error', 'Invalid wait_ms');
-        return;
-      }
-      if (waitMs > HEARTBEAT_MAX_WAIT_MS) {
-        sendError(reply, 400, 'validation_error', 'wait_ms out of range', {
-          max_wait_ms: HEARTBEAT_MAX_WAIT_MS
-        });
-        return;
-      }
-
-      let updatedAfter: Date | null = null;
-      if (updatedAfterParam) {
-        const parsed = new Date(updatedAfterParam);
-        if (Number.isNaN(parsed.getTime())) {
-          sendError(reply, 400, 'validation_error', 'Invalid updated_after');
-          return;
-        }
-        updatedAfter = parsed;
-      }
-
-      const statusValues: JobStatus[] = [
-        'requested',
-        'quoted',
-        'accepted',
-        'running',
-        'delivered',
-        'failed',
-        'canceled',
-        'expired'
-      ];
-
-      let statuses: JobStatus[] = [];
-      if (statusParam) {
-        statuses = statusParam
-          .split(',')
-          .map((value) => value.trim())
-          .filter(Boolean)
-          .map((value) => value as JobStatus);
-        if (
-          statuses.length === 0 ||
-          statuses.some((status) => !statusValues.includes(status))
-        ) {
-          sendError(reply, 400, 'validation_error', 'Invalid status filter');
-          return;
-        }
-      } else {
-        statuses = ['requested', 'accepted', 'running'];
-      }
-
-      const fetchJobs = async () => {
-        let base = db
-          .selectFrom('jobs')
-          .where('seller_pubkey', '=', request.auth.pubkey);
-        if (statuses.length > 0) {
-          base = base.where('status', 'in', statuses);
-        }
-        if (updatedAfter) {
-          base = base.where('updated_at', '>', updatedAfter);
-        }
-
-        const totalRow = await base
-          .select((eb) => eb.fn.countAll().as('count'))
-          .executeTakeFirst();
-        const total = Number(totalRow?.count ?? 0);
-
-        let jobsQuery = base.selectAll();
-        if (updatedAfter) {
-          jobsQuery = jobsQuery.orderBy('updated_at', 'asc');
-        } else {
-          jobsQuery = jobsQuery.orderBy('created_at', 'desc');
-        }
-
-        const jobs = await jobsQuery.limit(limit).offset(offset).execute();
-        return { jobs, total };
-      };
-
-      const startedAt = Date.now();
-      let { jobs, total } = await fetchJobs();
-      if (jobs.length === 0 && waitMs > 0) {
-        metrics.inc('heartbeat.wait');
-        const waitResult = await waitForSellerUpdate(
-          request.auth.pubkey,
-          waitMs
-        );
-        metrics.inc('heartbeat.wait_result', { result: waitResult });
-        ({ jobs, total } = await fetchJobs());
-      }
-
-      reply.send({
-        jobs,
-        limit,
-        offset,
-        total,
-        waited_ms: Date.now() - startedAt
-      });
     }
   );
 
@@ -1384,7 +1194,6 @@ export const buildServer = async (databaseUrl?: string) => {
         .where('job_id', '=', jobId)
         .returningAll()
         .executeTakeFirst();
-      notifySeller(job.seller_pubkey);
       reply.send({ job: updated });
     }
   );

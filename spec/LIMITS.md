@@ -33,7 +33,6 @@
 ## TTL Decisions
 - Auth timestamp skew: +/- 60 seconds
 - REST nonce replay window: 10 minutes
-- Heartbeat max wait: 30 seconds (`RELAY_HEARTBEAT_MAX_WAIT_MS`)
 - Quote TTL: default 15 minutes if not provided; max 60 minutes
 - Accept-to-payment TTL: 30 minutes after transition to `accepted`
 - Lock TTL: 5 minutes; `/v1/jobs/:id/lock` by the same seller extends the lock

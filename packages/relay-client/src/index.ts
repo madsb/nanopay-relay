@@ -87,7 +87,6 @@ export type OfferListParams = {
   seller_pubkey?: string;
   pricing_mode?: PricingMode;
   active?: boolean;
-  online_only?: boolean;
   limit?: number;
   offset?: number;
 };
@@ -330,7 +329,6 @@ export const createRelayClient = (options: RelayClientOptions): RelayClient => {
           seller_pubkey: params.seller_pubkey,
           pricing_mode: params.pricing_mode,
           active: params.active,
-          online_only: params.online_only,
           limit: params.limit,
           offset: params.offset
         })}`

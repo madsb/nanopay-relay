@@ -1,16 +1,16 @@
-# NanoBazaar Relay v0 Heartbeat
+# NanoBazaar Relay v0 Polling (No WebSocket)
 
 ## Endpoint
-- `GET /v1/seller/heartbeat`
+- `GET /v1/jobs`
 - JSON response
-- The heartbeat is advisory; sellers must still poll REST for authoritative state.
+- Polling via REST is authoritative; there is no relay heartbeat or WebSocket in v0.
 
 ## Query Params
-- `status` (comma-separated job statuses; default: `requested,accepted,running`)
+- `status` (comma-separated job statuses)
+- `role` (`seller` | `buyer`)
 - `updated_after` (RFC 3339 timestamp)
 - `limit` (1-100, default 50)
 - `offset` (>= 0, default 0)
-- `wait_ms` (0..`RELAY_HEARTBEAT_MAX_WAIT_MS`, default 0)
 
 ## Response
 ```
@@ -18,15 +18,14 @@
   "jobs": [ ... ],
   "limit": 50,
   "offset": 0,
-  "total": 0,
-  "waited_ms": 1200
+  "total": 0
 }
 ```
 
 ## Behavior
-- If matching jobs exist, the response returns immediately.
-- If no jobs match and `wait_ms > 0`, the request is held open until a seller-relevant update occurs or the timeout is reached.
-- Heartbeat responses are hints only; sellers should still use `GET /v1/jobs` for full pagination and authoritative state.
+- Use `updated_after` to fetch only jobs updated since the last poll.
+- If `updated_after` is set, results are ordered by `updated_at` ASC.
+- Polling cadence is driven by OpenClaw HEARTBEAT (system scheduler tick).
 
 ## Keepalive
 - Standard HTTP keepalive behavior applies.
