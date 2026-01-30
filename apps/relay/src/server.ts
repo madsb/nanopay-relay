@@ -467,6 +467,21 @@ export const buildServer = async (databaseUrl?: string) => {
     }
   };
 
+  const maybeSendIdempotencyResponse = (
+    request: FastifyRequest,
+    reply: FastifyReply
+  ): boolean => {
+    const response = request.idempotencyResponse;
+    if (!response) return false;
+    if (response.headers) {
+      for (const [key, value] of Object.entries(response.headers)) {
+        reply.header(key, value);
+      }
+    }
+    reply.code(response.status).send(response.body ?? null);
+    return true;
+  };
+
   const requireIdempotency = async (
     request: FastifyRequest,
     reply: FastifyReply
@@ -480,16 +495,22 @@ export const buildServer = async (databaseUrl?: string) => {
           ? header[0]?.trim()
           : '';
     if (!key) {
-      sendError(reply, 400, 'validation_error', 'Idempotency-Key is required');
+      request.idempotencyResponse = {
+        status: 400,
+        body: errorResponse('validation_error', 'Idempotency-Key is required')
+      };
       return;
     }
     if (key.length > MAX_IDEMPOTENCY_KEY_LEN) {
-      sendError(reply, 400, 'validation_error', 'Idempotency-Key too long', {
-        max_length: MAX_IDEMPOTENCY_KEY_LEN
-      });
+      request.idempotencyResponse = {
+        status: 400,
+        body: errorResponse('validation_error', 'Idempotency-Key too long', {
+          max_length: MAX_IDEMPOTENCY_KEY_LEN
+        })
+      };
       return;
     }
-    if (!request.auth || reply.sent) {
+    if (!request.auth) {
       return;
     }
 
@@ -530,30 +551,43 @@ export const buildServer = async (databaseUrl?: string) => {
         .where('idempotency_key', '=', key)
         .executeTakeFirst();
       if (!existing) {
-        sendError(reply, 409, 'idempotency_conflict', 'Idempotency conflict');
+        request.idempotencyResponse = {
+          status: 409,
+          body: errorResponse(
+            'idempotency_conflict',
+            'Idempotency conflict'
+          )
+        };
         return;
       }
       if (existing.request_hash !== requestHash) {
-        sendError(
-          reply,
-          409,
-          'idempotency_conflict',
-          'Idempotency key already used with different payload'
-        );
+        request.idempotencyResponse = {
+          status: 409,
+          body: errorResponse(
+            'idempotency_conflict',
+            'Idempotency key already used with different payload'
+          )
+        };
         return;
       }
       if (existing.response_status !== null) {
-        reply.header('idempotency-key', key);
-        reply.header('idempotency-replayed', 'true');
-        reply.code(existing.response_status).send(existing.response_body ?? null);
+        request.idempotencyResponse = {
+          status: existing.response_status,
+          body: existing.response_body ?? null,
+          headers: {
+            'idempotency-key': key,
+            'idempotency-replayed': 'true'
+          }
+        };
         return;
       }
-      sendError(
-        reply,
-        409,
-        'idempotency_in_progress',
-        'Idempotent request is already in progress'
-      );
+      request.idempotencyResponse = {
+        status: 409,
+        body: errorResponse(
+          'idempotency_in_progress',
+          'Idempotent request is already in progress'
+        )
+      };
       return;
     }
 
@@ -568,18 +602,25 @@ export const buildServer = async (databaseUrl?: string) => {
   const authWithIdempotency = [requireAuth, requireIdempotency];
 
   server.addHook('onSend', async (request, reply, payload) => {
+    if (!reply.sent) {
+      reply.hijack();
+    }
     const info = request.idempotency;
     if (!info) return payload;
     const responseBody = parseResponsePayload(payload);
-    await db
-      .updateTable('idempotency_keys')
-      .set({
-        response_status: reply.statusCode,
-        response_body: responseBody
-      })
-      .where('pubkey', '=', info.pubkey)
-      .where('idempotency_key', '=', info.key)
-      .execute();
+    try {
+      await db
+        .updateTable('idempotency_keys')
+        .set({
+          response_status: reply.statusCode,
+          response_body: responseBody
+        })
+        .where('pubkey', '=', info.pubkey)
+        .where('idempotency_key', '=', info.key)
+        .execute();
+    } catch (error) {
+      console.error('Failed to persist idempotency response', error);
+    }
     return payload;
   });
 
@@ -867,7 +908,9 @@ export const buildServer = async (databaseUrl?: string) => {
     '/v1/offers',
     { preHandler: authWithIdempotency },
     async (request, reply) => {
+      if (reply.sent) return;
       if (!request.auth) return;
+      if (maybeSendIdempotencyResponse(request, reply)) return;
       const parsed = OfferCreateSchema.safeParse(request.body);
       if (!parsed.success) {
         sendError(reply, 400, 'validation_error', 'Invalid offer', {
@@ -1013,7 +1056,9 @@ export const buildServer = async (databaseUrl?: string) => {
     '/v1/jobs',
     { preHandler: authWithIdempotency },
     async (request, reply) => {
+      if (reply.sent) return;
       if (!request.auth) return;
+      if (maybeSendIdempotencyResponse(request, reply)) return;
       const parsed = JobCreateSchema.safeParse(request.body);
       if (!parsed.success) {
         sendError(reply, 400, 'validation_error', 'Invalid job', {
@@ -1202,7 +1247,9 @@ export const buildServer = async (databaseUrl?: string) => {
     '/v1/jobs/:id/quote',
     { preHandler: authWithIdempotency },
     async (request, reply) => {
+      if (reply.sent) return;
       if (!request.auth) return;
+      if (maybeSendIdempotencyResponse(request, reply)) return;
       const jobId = (request.params as { id: string }).id;
       const parsed = QuoteSchema.safeParse(request.body);
       if (!parsed.success) {
@@ -1274,7 +1321,9 @@ export const buildServer = async (databaseUrl?: string) => {
     '/v1/jobs/:id/accept',
     { preHandler: authWithIdempotency },
     async (request, reply) => {
+      if (reply.sent) return;
       if (!request.auth) return;
+      if (maybeSendIdempotencyResponse(request, reply)) return;
       const jobId = (request.params as { id: string }).id;
       const job = await getJobOr404(jobId, reply);
       if (!job) return;
@@ -1313,7 +1362,9 @@ export const buildServer = async (databaseUrl?: string) => {
     '/v1/jobs/:id/payment',
     { preHandler: authWithIdempotency },
     async (request, reply) => {
+      if (reply.sent) return;
       if (!request.auth) return;
+      if (maybeSendIdempotencyResponse(request, reply)) return;
       const jobId = (request.params as { id: string }).id;
       const parsed = PaymentSchema.safeParse(request.body);
       if (!parsed.success) {
@@ -1352,7 +1403,9 @@ export const buildServer = async (databaseUrl?: string) => {
     '/v1/jobs/:id/lock',
     { preHandler: authWithIdempotency },
     async (request, reply) => {
+      if (reply.sent) return;
       if (!request.auth) return;
+      if (maybeSendIdempotencyResponse(request, reply)) return;
       const jobId = (request.params as { id: string }).id;
       const job = await getJobOr404(jobId, reply);
       if (!job) return;
@@ -1400,7 +1453,9 @@ export const buildServer = async (databaseUrl?: string) => {
     '/v1/jobs/:id/deliver',
     { preHandler: authWithIdempotency },
     async (request, reply) => {
+      if (reply.sent) return;
       if (!request.auth) return;
+      if (maybeSendIdempotencyResponse(request, reply)) return;
       const jobId = (request.params as { id: string }).id;
       const parsed = DeliverSchema.safeParse(request.body);
       if (!parsed.success) {
@@ -1467,7 +1522,9 @@ export const buildServer = async (databaseUrl?: string) => {
     '/v1/jobs/:id/cancel',
     { preHandler: authWithIdempotency },
     async (request, reply) => {
+      if (reply.sent) return;
       if (!request.auth) return;
+      if (maybeSendIdempotencyResponse(request, reply)) return;
       const jobId = (request.params as { id: string }).id;
       const parsed = CancelSchema.safeParse(request.body ?? {});
       if (!parsed.success) {

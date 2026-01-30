@@ -18,6 +18,11 @@ declare module 'fastify' {
     auth?: {
       pubkey: string;
     };
+    idempotencyResponse?: {
+      status: number;
+      body: unknown;
+      headers?: Record<string, string>;
+    };
     idempotency?: {
       key: string;
       requestHash: string;
