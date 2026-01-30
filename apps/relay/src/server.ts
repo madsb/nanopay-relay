@@ -27,6 +27,7 @@ const MAX_TAG_LEN = 32;
 const MAX_PRICE_LEN = 40;
 const MAX_INVOICE_LEN = 128;
 const MAX_PAYMENT_HASH_LEN = 128;
+const MAX_PROVIDER_LEN = 32;
 const MAX_IDEMPOTENCY_KEY_LEN = 128;
 
 const QUOTE_TTL_MS = 15 * 60 * 1000;
@@ -748,7 +749,25 @@ export const buildServer = async (databaseUrl?: string) => {
   const QuoteSchema = z.object({
     quote_amount_raw: z.string().max(MAX_PRICE_LEN).regex(/^[0-9]+$/),
     quote_invoice_address: z.string().min(1).max(MAX_INVOICE_LEN),
-    quote_expires_at: z.string().datetime().optional().nullable()
+    quote_expires_at: z.string().datetime().optional().nullable(),
+    payment_charge_id: z
+      .string()
+      .min(1)
+      .max(MAX_PAYMENT_HASH_LEN)
+      .optional()
+      .nullable(),
+    payment_charge_address: z
+      .string()
+      .min(1)
+      .max(MAX_INVOICE_LEN)
+      .optional()
+      .nullable(),
+    payment_provider: z
+      .string()
+      .min(1)
+      .max(MAX_PROVIDER_LEN)
+      .optional()
+      .nullable()
   });
 
   const PaymentSchema = z.object({
@@ -1028,6 +1047,9 @@ export const buildServer = async (databaseUrl?: string) => {
           quote_invoice_address: null,
           quote_expires_at: null,
           payment_tx_hash: null,
+          payment_charge_id: null,
+          payment_charge_address: null,
+          payment_sweep_tx_hash: null,
           lock_owner: null,
           lock_expires_at: null,
           result_payload: null,
@@ -1205,13 +1227,29 @@ export const buildServer = async (databaseUrl?: string) => {
         return;
       }
 
+      const paymentProvider =
+        input.payment_provider !== undefined
+          ? input.payment_provider
+          : input.payment_charge_id || input.payment_charge_address
+            ? 'berrypay'
+            : undefined;
+
       const updated = await db
         .updateTable('jobs')
         .set({
           status: 'quoted',
           quote_amount_raw: input.quote_amount_raw,
           quote_invoice_address: input.quote_invoice_address,
-          quote_expires_at: quoteExpires
+          quote_expires_at: quoteExpires,
+          ...(input.payment_charge_id !== undefined && {
+            payment_charge_id: input.payment_charge_id
+          }),
+          ...(input.payment_charge_address !== undefined && {
+            payment_charge_address: input.payment_charge_address
+          }),
+          ...(paymentProvider !== undefined && {
+            payment_provider: paymentProvider
+          })
         })
         .where('job_id', '=', jobId)
         .returningAll()

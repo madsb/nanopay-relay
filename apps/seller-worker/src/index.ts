@@ -224,7 +224,10 @@ const createQuote = async (jobId: string) => {
   const payload = {
     quote_amount_raw: charge.amount_raw ?? quoteAmountRaw,
     quote_invoice_address: charge.address,
-    quote_expires_at: new Date(Date.now() + quoteExpiresMs).toISOString()
+    quote_expires_at: new Date(Date.now() + quoteExpiresMs).toISOString(),
+    payment_charge_id: charge.chargeId,
+    payment_charge_address: charge.address,
+    payment_provider: 'berrypay'
   };
   return apiRequest('POST', `/v1/jobs/${jobId}/quote`, payload);
 };

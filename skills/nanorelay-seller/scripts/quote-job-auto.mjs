@@ -56,7 +56,10 @@ const result = await client.quoteJob(jobId, {
   quote_amount_raw: resolvedAmountRaw,
   quote_invoice_address: charge.address,
   quote_expires_at:
-    typeof quoteExpiresAt === 'string' ? quoteExpiresAt : undefined
+    typeof quoteExpiresAt === 'string' ? quoteExpiresAt : undefined,
+  payment_charge_id: charge.chargeId,
+  payment_charge_address: charge.address,
+  payment_provider: 'berrypay'
 });
 
 if (!result.ok) {

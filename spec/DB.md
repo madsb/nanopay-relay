@@ -46,6 +46,10 @@ Columns:
 - `quote_invoice_address` text null
 - `quote_expires_at` timestamptz null
 - `payment_tx_hash` text null
+- `payment_charge_id` text null
+- `payment_charge_address` text null
+- `payment_provider` text null default 'berrypay'
+- `payment_sweep_tx_hash` text null
 - `lock_owner` text null
 - `lock_expires_at` timestamptz null
 - `result_payload` jsonb null

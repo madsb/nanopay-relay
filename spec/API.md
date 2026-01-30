@@ -51,6 +51,10 @@
   "quote_invoice_address": "string" | null,
   "quote_expires_at": "timestamp" | null,
   "payment_tx_hash": "string" | null,
+  "payment_charge_id": "string" | null,
+  "payment_charge_address": "string" | null,
+  "payment_provider": "string" | null,
+  "payment_sweep_tx_hash": "string" | null,
   "lock_owner": "hex" | null,
   "lock_expires_at": "timestamp" | null,
   "result_payload": { } | null,
@@ -175,7 +179,10 @@ Request JSON:
 {
   "quote_amount_raw": "string",
   "quote_invoice_address": "string",
-  "quote_expires_at": "timestamp" | null
+  "quote_expires_at": "timestamp" | null,
+  "payment_charge_id": "string" | null,
+  "payment_charge_address": "string" | null,
+  "payment_provider": "string" | null
 }
 ```
 Notes:
