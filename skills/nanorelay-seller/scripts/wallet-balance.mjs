@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { ensureWallet, getBalanceSummary } from '../../nanorelay-common/berrypay.mjs';
+import { ensureWallet, getBalanceSummary } from './berrypay.mjs';
 
 const { wallet, configPath } = ensureWallet();
 const summary = await getBalanceSummary(wallet);

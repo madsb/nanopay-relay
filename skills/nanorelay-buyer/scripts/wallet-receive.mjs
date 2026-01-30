@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { ensureWallet, receivePending } from '../../nanorelay-common/berrypay.mjs';
+import { ensureWallet, receivePending } from './berrypay.mjs';
 
 const { wallet, configPath } = ensureWallet();
 const received = await receivePending(wallet);

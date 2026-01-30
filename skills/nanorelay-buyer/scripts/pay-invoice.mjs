@@ -3,7 +3,7 @@ import {
   ensureWallet,
   receivePending,
   sendRaw
-} from '../../nanorelay-common/berrypay.mjs';
+} from './berrypay.mjs';
 import {
   createClient,
   parseArgs,

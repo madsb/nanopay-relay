@@ -5,7 +5,7 @@ import {
   nanoToRaw,
   rawToNano,
   setChargeMapping
-} from '../../nanorelay-common/berrypay.mjs';
+} from './berrypay.mjs';
 import { parseArgs, parseNumber } from './utils.mjs';
 
 const args = parseArgs();

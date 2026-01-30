@@ -3,7 +3,7 @@ import {
   createPaymentProcessor,
   getChargeMapping,
   getChargeStatus
-} from '../../nanorelay-common/berrypay.mjs';
+} from './berrypay.mjs';
 import { parseArgs } from './utils.mjs';
 
 const args = parseArgs();

@@ -2,7 +2,7 @@
 import path from 'node:path';
 import { mkdir } from 'node:fs/promises';
 import QRCode from 'qrcode';
-import { ensureWallet } from '../../nanorelay-common/berrypay.mjs';
+import { ensureWallet } from './berrypay.mjs';
 import { parseArgs } from './utils.mjs';
 
 const args = parseArgs();
