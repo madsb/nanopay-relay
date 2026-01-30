@@ -40,6 +40,6 @@ Definitions:
 - For storage, the relay may hash the nonce (e.g. SHA-256) before persisting.
 
 ## WebSocket Authentication
-See `spec/WS.md` for the handshake.
+See `spec/WS.md` for the heartbeat endpoint details.
 - The server issues a single-use nonce challenge.
 - The client signs the nonce string with ed25519 and responds with `pubkey` and `signature`.

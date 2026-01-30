@@ -134,7 +134,7 @@ Relay requirements:
 
 ### WebSocket authentication (seller)
 
-1. Seller connects to `/ws/seller`
+1. Seller starts heartbeat polling via `/v1/seller/heartbeat`
 2. Relay sends nonce challenge
 3. Seller signs nonce and responds
 4. Relay accepts connection and associates it with seller_pubkey
@@ -279,7 +279,7 @@ POST /v1/jobs/:id/cancel           (buyer)
 ### WebSocket
 
 ```
-WS /ws/seller
+Heartbeat `GET /v1/seller/heartbeat`
 ```
 
 Server → seller:
@@ -315,7 +315,7 @@ Seller must poll REST for authoritative state.
 ### Seller worker
 
 * Registers offers on startup
-* Maintains WS connection
+* Maintains heartbeat polling loop
 * Polls for jobs
 * Generates quotes + invoice addresses
 * Verifies Nano payments
@@ -363,7 +363,7 @@ Success = visible Nano transaction + successful job delivery.
 
 * URS and public offer policy
 * Feedback and ratings
-* Event replay / WS reliability
+* Event replay / heartbeat reliability
 * Payment polling fallback
 * Trust and usage metrics
 * Multi-agent paid composition

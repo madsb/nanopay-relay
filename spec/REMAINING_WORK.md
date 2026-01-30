@@ -2,7 +2,7 @@
 
 ## 1) Current State Summary (short)
 
-- Relay API and `/ws/seller` are implemented (WS is advisory with `hint.new_job`), and REST is signed with ed25519 headers.
+- Relay API and `/v1/seller/heartbeat` are implemented (heartbeat is advisory), and REST is signed with ed25519 headers.
 - DB schema + migrations exist for offers, jobs, and auth nonces; state machine and payload limits are enforced.
 - Seller demo worker exists and registers an offer, polls jobs, quotes, locks, and delivers results.
 - Payment verification is currently stubbed; Nano wallet handling is not implemented.
@@ -19,7 +19,7 @@
 - Implement Moltbot/Clawcode seller skill + production worker wrapper around the existing demo logic.
 - Real quote generation using Nano invoice addresses.
 - Real payment verification via Nano RPC.
-- Outbound-only runtime patterns (WS + REST polling, with resilient reconnect/backoff).
+- Outbound-only runtime patterns (heartbeat + REST polling, with resilient backoff).
 
 ### Wallet
 - Implement Nano wallet primitives using `nanocurrency-js` (seed → account keys → address).
@@ -55,7 +55,7 @@ sequenceDiagram
 
   B->>R: GET /v1/offers
   B->>R: POST /v1/jobs
-  R-->>S: WS hint.new_job (advisory)
+  R-->>S: Heartbeat hint (advisory)
   S->>R: POST /v1/jobs/:id/quote
   B->>R: GET /v1/jobs/:id (poll)
   B->>R: POST /v1/jobs/:id/accept
@@ -69,8 +69,8 @@ sequenceDiagram
 ### Seller flow (quote → verify → lock → execute → deliver)
 
 Step list:
-1. Startup: register offers `POST /v1/offers`; connect to `/ws/seller`.
-2. On `hint.new_job`, poll `GET /v1/jobs?role=seller&status=requested,accepted`.
+1. Startup: register offers `POST /v1/offers`; start heartbeat polling.
+2. On heartbeat response with updates, poll `GET /v1/jobs?role=seller&status=requested,accepted`.
 3. For `requested`: validate payload → generate invoice address → submit quote.
 4. For `accepted`: verify payment (Nano RPC); if valid, acquire lock.
 5. Execute job; renew lock lease if execution exceeds TTL.
@@ -83,8 +83,8 @@ sequenceDiagram
   participant R as Relay
   participant N as Nano RPC
 
-  S->>R: WS auth + connect
-  R-->>S: hint.new_job
+  S->>R: GET /v1/seller/heartbeat (long-poll)
+  R-->>S: heartbeat response (jobs or empty)
   S->>R: GET /v1/jobs?role=seller&status=requested,accepted
   S->>R: POST /v1/jobs/:id/quote (amount + invoice address)
   S->>N: Verify payment (tx hash / receivable)
@@ -321,7 +321,7 @@ NANO_WALLET_STATE_PATH=./data/wallet-state.json
   - Do not retry on `invalid_state` or `auth.*` without operator action.
 - **Observability**:
   - Structured logs with `request_id`, `job_id`, `seller_pubkey`, `buyer_pubkey`.
-  - Metrics: job state transitions, WS connections, verification failures.
+  - Metrics: job state transitions, heartbeat waits, verification failures.
   - Optional tracing headers passthrough.
 
 ## 8) Testing Plan
@@ -344,7 +344,7 @@ NANO_WALLET_STATE_PATH=./data/wallet-state.json
 |---|---:|---|---|
 | M1: Skills scaffolding + buyer flow | 1 week | none | Buyer skill can search, request, accept, submit tx hash, poll result using signed requests |
 | M2: Wallet + verification | 1 week | M1 | Seller worker generates per‑job address, verifies payment via Nano RPC, locks and delivers only after verify |
-| M3: Outbound‑only robustness | 1 week | M1 | Worker runs with WS + polling, reconnect/backoff, lock renewal, no inbound ports |
+| M3: Outbound‑only robustness | 1 week | M1 | Worker runs with heartbeat + polling, backoff, lock renewal, no inbound ports |
 | M4: Hardening + docs | 1 week | M2/M3 | Idempotency, rate limits, observability, updated API docs to match `/v1` + job listing |
 
 ## 10) Open Questions

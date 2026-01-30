@@ -1,11 +1,9 @@
 import { randomBytes } from 'node:crypto';
 import { setTimeout as delay } from 'node:timers/promises';
 import { fetch } from 'undici';
-import WebSocket from 'ws';
 import {
   publicKeyFromPrivateKeyHex,
-  signCanonical,
-  signNonce
+  signCanonical
 } from '@nanobazaar/shared';
 import type { Job } from './types.js';
 import {
@@ -30,12 +28,14 @@ const parseEnvInt = (value: string | undefined, fallback: number) => {
 
 const pollIntervalMs = parseEnvInt(process.env.POLL_INTERVAL_MS, 2000);
 const pollJitterMs = parseEnvInt(process.env.POLL_JITTER_MS, 250);
+const pollMaxIntervalMs = Math.max(
+  parseEnvInt(process.env.POLL_MAX_INTERVAL_MS, 30000),
+  pollIntervalMs
+);
 const lockRenewIntervalMs = parseEnvInt(
   process.env.LOCK_RENEW_INTERVAL_MS,
   120000
 );
-const wsBackoffBaseMs = parseEnvInt(process.env.WS_BACKOFF_BASE_MS, 500);
-const wsBackoffMaxMs = parseEnvInt(process.env.WS_BACKOFF_MAX_MS, 30000);
 const jobPageSize = 50;
 const quoteAmountRaw = process.env.QUOTE_AMOUNT_RAW ?? '1000';
 const quoteExpiresMs = parseEnvInt(process.env.QUOTE_EXPIRES_MS, 10 * 60 * 1000);
@@ -55,8 +55,6 @@ if (!sellerPrivkey) {
 }
 
 const sellerPubkey = publicKeyFromPrivateKeyHex(sellerPrivkey);
-
-const wsUrl = relayUrl.replace(/^http/i, 'ws') + '/ws/seller';
 
 let processor: ReturnType<typeof createPaymentProcessor> | null = null;
 const jobToChargeId = new Map<string, string>();
@@ -147,6 +145,10 @@ type JobListResponse = {
   total: number;
 };
 
+type HeartbeatResponse = JobListResponse & {
+  waited_ms?: number;
+};
+
 const listJobs = async (options: {
   updatedAfter?: string | null;
   statuses?: string;
@@ -164,6 +166,28 @@ const listJobs = async (options: {
   }
   const path = `/v1/jobs?${params.toString()}`;
   return apiRequest<JobListResponse>('GET', path);
+};
+
+const heartbeat = async (options: {
+  updatedAfter?: string | null;
+  statuses?: string;
+  waitMs?: number;
+  limit?: number;
+  offset?: number;
+}) => {
+  const params = new URLSearchParams({
+    status: options.statuses ?? 'requested,accepted,running',
+    limit: String(options.limit ?? 1),
+    offset: String(options.offset ?? 0)
+  });
+  if (options.updatedAfter) {
+    params.set('updated_after', options.updatedAfter);
+  }
+  if (options.waitMs && options.waitMs > 0) {
+    params.set('wait_ms', String(options.waitMs));
+  }
+  const path = `/v1/seller/heartbeat?${params.toString()}`;
+  return apiRequest<HeartbeatResponse>('GET', path);
 };
 
 const loadChargeMappings = async () => {
@@ -316,7 +340,7 @@ const lockLostJobs = new Set<string>();
 let polling = false;
 let lastUpdatedAt: string | null = null;
 let initialSyncDone = false;
-let wsReconnectAttempts = 0;
+let heartbeatWaitMs = pollIntervalMs;
 
 const isTrackedStatus = (status: string) =>
   status === 'requested' || status === 'accepted' || status === 'running';
@@ -586,119 +610,78 @@ const processTrackedJobs = async () => {
   }
 };
 
+const isActiveWorker = () =>
+  trackedJobs.size > 0 || inFlightJobs.size > 0 || lockLostJobs.size > 0;
+
+const computeHeartbeatWaitMs = () => {
+  const jitter = pollJitterMs > 0 ? Math.floor(Math.random() * pollJitterMs) : 0;
+  return Math.max(pollIntervalMs, heartbeatWaitMs + jitter);
+};
+
+const heartbeatOnce = async (waitMs: number) => {
+  const cursor = getCursorTimestamp();
+  const response = await heartbeat({
+    updatedAfter: cursor ?? undefined,
+    waitMs,
+    limit: 1
+  });
+  if (response.status !== 200 || !response.data) {
+    console.error('Heartbeat failed', response.status, response.data);
+    return null;
+  }
+  return response.data.jobs.length > 0;
+};
+
+const adjustHeartbeatWait = (hadUpdates: boolean) => {
+  if (hadUpdates || isActiveWorker()) {
+    heartbeatWaitMs = pollIntervalMs;
+    return;
+  }
+  heartbeatWaitMs = Math.min(
+    pollMaxIntervalMs,
+    Math.max(pollIntervalMs, Math.floor(heartbeatWaitMs * 1.5))
+  );
+};
+
 const pollOnce = async () => {
   if (polling) return;
   polling = true;
   try {
     if (!initialSyncDone) {
       await syncTrackedJobs();
+      await fetchUpdates();
     }
-    await fetchUpdates();
     await processTrackedJobs();
+    const waitMs = computeHeartbeatWaitMs();
+    const hadUpdates = await heartbeatOnce(waitMs);
+    if (hadUpdates === null) {
+      await delay(pollIntervalMs);
+      heartbeatWaitMs = pollIntervalMs;
+      return;
+    }
+    if (hadUpdates) {
+      await fetchUpdates();
+      await processTrackedJobs();
+    }
+    adjustHeartbeatWait(hadUpdates);
   } catch (error) {
     console.error('Polling error', error);
+    heartbeatWaitMs = pollIntervalMs;
   } finally {
     polling = false;
   }
 };
 
-let pollTimer: NodeJS.Timeout | null = null;
-let wsReconnectTimer: NodeJS.Timeout | null = null;
-
-const scheduleNextPoll = () => {
-  if (pollTimer) return;
-  const jitter = pollJitterMs > 0 ? Math.floor(Math.random() * pollJitterMs) : 0;
-  pollTimer = setTimeout(() => {
-    pollTimer = null;
-    void pollOnce().finally(() => {
-      scheduleNextPoll();
-    });
-  }, pollIntervalMs + jitter);
-};
+let pollLoopRunning = false;
 
 const startPolling = () => {
-  if (pollTimer) return;
-  scheduleNextPoll();
-  void pollOnce();
-};
-
-const resetWsBackoff = () => {
-  wsReconnectAttempts = 0;
-};
-
-const scheduleWsReconnect = (reason: string) => {
-  if (wsReconnectTimer) return;
-  const attempt = Math.min(wsReconnectAttempts, 10);
-  const maxDelay = Math.min(wsBackoffMaxMs, wsBackoffBaseMs * 2 ** attempt);
-  const delayMs = Math.floor(Math.random() * maxDelay);
-  wsReconnectAttempts += 1;
-  console.log(`WS reconnecting in ${delayMs}ms (${reason})`);
-  wsReconnectTimer = setTimeout(() => {
-    wsReconnectTimer = null;
-    connectWebSocket();
-  }, delayMs);
-};
-
-const connectWebSocket = () => {
-  const ws = new WebSocket(wsUrl);
-
-  ws.on('open', () => {
-    console.log('WS connected');
-  });
-
-  ws.on('message', (data) => {
-    const text = Buffer.isBuffer(data) ? data.toString('utf8') : String(data);
-    let message: any;
-    try {
-      message = JSON.parse(text);
-    } catch {
-      console.error('Invalid WS message');
-      return;
+  if (pollLoopRunning) return;
+  pollLoopRunning = true;
+  void (async () => {
+    while (pollLoopRunning) {
+      await pollOnce();
     }
-
-    if (message.type === 'auth.challenge') {
-      const nonce = message.nonce;
-      if (typeof nonce !== 'string') {
-        console.error('Invalid WS nonce');
-        return;
-      }
-      const signature = signNonce(nonce, sellerPrivkey);
-      ws.send(
-        JSON.stringify({
-          type: 'auth.response',
-          pubkey: sellerPubkey,
-          signature
-        })
-      );
-      return;
-    }
-
-    if (message.type === 'auth.ok') {
-      console.log('WS authenticated');
-      resetWsBackoff();
-      return;
-    }
-
-    if (message.type === 'hint.new_job') {
-      void pollOnce();
-      return;
-    }
-
-    if (message.type === 'error') {
-      console.error('WS error', message);
-      return;
-    }
-  });
-
-  ws.on('close', () => {
-    scheduleWsReconnect('close');
-  });
-
-  ws.on('error', (error) => {
-    console.error('WS error', error);
-    ws.close();
-    scheduleWsReconnect('error');
-  });
+  })();
 };
 
 const registerOfferWithRetry = async () => {
@@ -730,7 +713,6 @@ const main = async () => {
   }
   void registerOfferWithRetry();
 
-  connectWebSocket();
   startPolling();
 };
 

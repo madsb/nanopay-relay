@@ -1,11 +1,10 @@
 import Fastify, { type FastifyReply, type FastifyRequest } from 'fastify';
 import swagger from '@fastify/swagger';
 import swaggerUi from '@fastify/swagger-ui';
-import websocket from '@fastify/websocket';
 import { randomBytes } from 'node:crypto';
 import { sql } from 'kysely';
 import { z } from 'zod';
-import { sha256Hex, verifyCanonical, verifyNonce } from '@nanobazaar/shared';
+import { sha256Hex, verifyCanonical } from '@nanobazaar/shared';
 import { createDb, type JobStatus } from './db.js';
 import './types.js';
 
@@ -33,7 +32,7 @@ const MAX_IDEMPOTENCY_KEY_LEN = 128;
 const QUOTE_TTL_MS = 15 * 60 * 1000;
 const MAX_QUOTE_TTL_MS = 60 * 60 * 1000;
 const LOCK_TTL_MS = 5 * 60 * 1000;
-const WS_CHALLENGE_TTL_MS = 30 * 1000;
+const HEARTBEAT_MAX_WAIT_MS = parseEnvInt('RELAY_HEARTBEAT_MAX_WAIT_MS', 30_000);
 const IDEMPOTENCY_TTL_MS = 24 * 60 * 60 * 1000;
 
 const RATE_LIMIT_WINDOW_MS = parseEnvInt('RELAY_RATE_LIMIT_WINDOW_MS', 60_000);
@@ -232,50 +231,46 @@ export const buildServer = async (databaseUrl?: string) => {
     rateBuckets.set(key, existing);
     return { allowed: true, retryAfterSeconds: 0 };
   };
-  type WsSocket = {
-    readyState: number;
-    send: (data: string) => void;
-    close: () => void;
-    on: (event: string, listener: (...args: any[]) => void) => void;
-  };
-  const onlineSellers = new Map<string, Set<WsSocket>>();
-  const socketToSeller = new Map<WsSocket, string>();
+  const sellerHeartbeatWaiters = new Map<string, Set<() => void>>();
 
-  const addOnlineSeller = (sellerPubkey: string, socket: WsSocket) => {
-    const existing = onlineSellers.get(sellerPubkey);
-    if (existing) {
-      existing.add(socket);
-    } else {
-      onlineSellers.set(sellerPubkey, new Set([socket]));
-    }
-    socketToSeller.set(socket, sellerPubkey);
-  };
-
-  const removeOnlineSeller = (socket: WsSocket) => {
-    const sellerPubkey = socketToSeller.get(socket);
-    if (!sellerPubkey) return;
-    const sockets = onlineSellers.get(sellerPubkey);
-    if (sockets) {
-      sockets.delete(socket);
-      if (sockets.size === 0) {
-        onlineSellers.delete(sellerPubkey);
+  const notifySeller = (sellerPubkey: string) => {
+    const waiters = sellerHeartbeatWaiters.get(sellerPubkey);
+    if (!waiters || waiters.size === 0) return;
+    for (const waiter of Array.from(waiters)) {
+      try {
+        waiter();
+      } catch {
+        // ignore waiter failures; cleanup is handled by waiters
       }
     }
-    socketToSeller.delete(socket);
   };
 
-  const sendHint = (sellerPubkey: string) => {
-    const sockets = onlineSellers.get(sellerPubkey);
-    if (!sockets) return;
-    for (const socket of sockets) {
-      if (socket.readyState === 1) {
-        try {
-          socket.send(JSON.stringify({ type: 'hint.new_job' }));
-        } catch {
-          // ignore send errors; socket cleanup handled by close events
+  const waitForSellerUpdate = (sellerPubkey: string, timeoutMs: number) => {
+    if (timeoutMs <= 0) {
+      return Promise.resolve('timeout' as const);
+    }
+    return new Promise<'notified' | 'timeout'>((resolve) => {
+      const waiters =
+        sellerHeartbeatWaiters.get(sellerPubkey) ?? new Set<() => void>();
+      sellerHeartbeatWaiters.set(sellerPubkey, waiters);
+      let settled = false;
+      let timer: NodeJS.Timeout | null = null;
+
+      const cleanup = (result: 'notified' | 'timeout') => {
+        if (settled) return;
+        settled = true;
+        if (timer) clearTimeout(timer);
+        waiters.delete(onNotify);
+        if (waiters.size === 0) {
+          sellerHeartbeatWaiters.delete(sellerPubkey);
         }
-      }
-    }
+        resolve(result);
+      };
+
+      const onNotify = () => cleanup('notified');
+      waiters.add(onNotify);
+      timer = setTimeout(() => cleanup('timeout'), timeoutMs);
+    });
   };
 
   const db = createDb(
@@ -344,7 +339,6 @@ export const buildServer = async (databaseUrl?: string) => {
     routePrefix: '/docs'
   });
 
-  await server.register(websocket);
 
   const authFail = (
     reply: FastifyReply,
@@ -624,134 +618,6 @@ export const buildServer = async (databaseUrl?: string) => {
     return payload;
   });
 
-  server.get(
-    '/ws/seller',
-    { websocket: true },
-    (socket) => {
-      metrics.inc('ws.connect');
-      const nonce = randomBytes(16).toString('hex');
-      const expiresAt = new Date(Date.now() + WS_CHALLENGE_TTL_MS);
-
-      const sendWs = (payload: Record<string, unknown>) => {
-        if (socket.readyState === 1) {
-          socket.send(JSON.stringify(payload));
-        }
-      };
-
-      const sendWsError = (code: string, message: string) => {
-        metrics.inc('ws.auth_error', { code });
-        sendWs({ type: 'error', code, message });
-        socket.close();
-      };
-
-      let authed = false;
-      let challengeUsed = false;
-      const expiryTimer = setTimeout(() => {
-        if (!authed) {
-          sendWsError('auth.expired_challenge', 'Auth challenge expired');
-        }
-      }, WS_CHALLENGE_TTL_MS);
-
-      sendWs({
-        type: 'auth.challenge',
-        nonce,
-        expires_at: expiresAt.toISOString(),
-        server_time: new Date().toISOString()
-      });
-
-      const cleanup = () => {
-        clearTimeout(expiryTimer);
-        removeOnlineSeller(socket);
-      };
-
-      socket.on('message', (data) => {
-        if (authed) {
-          sendWsError('ws.unknown_type', 'Unexpected message');
-          return;
-        }
-
-        const text =
-          typeof data === 'string'
-            ? data
-            : Buffer.isBuffer(data)
-              ? data.toString('utf8')
-              : String(data);
-        let payload: unknown;
-        try {
-          payload = JSON.parse(text);
-        } catch {
-          sendWsError('ws.invalid_json', 'Invalid JSON');
-          return;
-        }
-
-        if (
-          !payload ||
-          typeof payload !== 'object' ||
-          Array.isArray(payload)
-        ) {
-          sendWsError('ws.invalid_message', 'Invalid message');
-          return;
-        }
-
-        const message = payload as Record<string, unknown>;
-        if (message.type !== 'auth.response') {
-          sendWsError('ws.unknown_type', 'Unknown message type');
-          return;
-        }
-        if (challengeUsed) {
-          sendWsError('auth.invalid_signature', 'Challenge already used');
-          return;
-        }
-        challengeUsed = true;
-
-        if (Date.now() > expiresAt.getTime()) {
-          sendWsError('auth.expired_challenge', 'Auth challenge expired');
-          return;
-        }
-
-        const pubkey = message.pubkey;
-        const signature = message.signature;
-        if (
-          typeof pubkey !== 'string' ||
-          pubkey.length !== 64 ||
-          !isLowerHex(pubkey)
-        ) {
-          sendWsError('auth.invalid_pubkey', 'Invalid pubkey');
-          return;
-        }
-        if (
-          typeof signature !== 'string' ||
-          signature.length !== 128 ||
-          !isLowerHex(signature)
-        ) {
-          sendWsError('auth.invalid_signature', 'Invalid signature');
-          return;
-        }
-
-        let verified = false;
-        try {
-          verified = verifyNonce(nonce, signature, pubkey);
-        } catch {
-          verified = false;
-        }
-        if (!verified) {
-          sendWsError('auth.invalid_signature', 'Invalid signature');
-          return;
-        }
-
-        authed = true;
-        clearTimeout(expiryTimer);
-        addOnlineSeller(pubkey, socket);
-        metrics.inc('ws.auth_ok');
-        server.log.info({ seller_pubkey: pubkey }, 'ws.auth_ok');
-        sendWs({ type: 'auth.ok', seller_pubkey: pubkey });
-      });
-
-      socket.on('close', cleanup);
-      socket.on('error', cleanup);
-    }
-  );
-
   const PricingModeSchema = z.enum(['fixed', 'quote']);
   const OfferCreateSchema = z
     .object({
@@ -871,6 +737,7 @@ export const buildServer = async (databaseUrl?: string) => {
       from: fromStatus ?? 'none',
       to: toStatus
     });
+    notifySeller(job.seller_pubkey);
     request.log.info(
       {
         request_id: request.id,
@@ -1111,11 +978,135 @@ export const buildServer = async (databaseUrl?: string) => {
         })
         .returningAll()
         .executeTakeFirst();
-      sendHint(offer.seller_pubkey);
       if (job) {
         recordJobTransition(request, job, null, job.status);
       }
       reply.code(201).send({ job });
+    }
+  );
+
+  server.get(
+    '/v1/seller/heartbeat',
+    { preHandler: requireAuth },
+    async (request, reply) => {
+      if (!request.auth) return;
+      metrics.inc('heartbeat.request');
+      const query = request.query as Record<string, string | undefined>;
+      const statusParam = query.status?.trim();
+      const limitParam = query.limit?.trim();
+      const offsetParam = query.offset?.trim();
+      const updatedAfterParam = query.updated_after?.trim();
+      const waitParam = query.wait_ms?.trim();
+
+      const limit = limitParam ? Number.parseInt(limitParam, 10) : 50;
+      const offset = offsetParam ? Number.parseInt(offsetParam, 10) : 0;
+
+      if (!Number.isFinite(limit) || limit < 1 || limit > 100) {
+        sendError(reply, 400, 'validation_error', 'Invalid limit');
+        return;
+      }
+      if (!Number.isFinite(offset) || offset < 0) {
+        sendError(reply, 400, 'validation_error', 'Invalid offset');
+        return;
+      }
+
+      let waitMs = waitParam ? Number.parseInt(waitParam, 10) : 0;
+      if (!Number.isFinite(waitMs) || waitMs < 0) {
+        sendError(reply, 400, 'validation_error', 'Invalid wait_ms');
+        return;
+      }
+      if (waitMs > HEARTBEAT_MAX_WAIT_MS) {
+        sendError(reply, 400, 'validation_error', 'wait_ms out of range', {
+          max_wait_ms: HEARTBEAT_MAX_WAIT_MS
+        });
+        return;
+      }
+
+      let updatedAfter: Date | null = null;
+      if (updatedAfterParam) {
+        const parsed = new Date(updatedAfterParam);
+        if (Number.isNaN(parsed.getTime())) {
+          sendError(reply, 400, 'validation_error', 'Invalid updated_after');
+          return;
+        }
+        updatedAfter = parsed;
+      }
+
+      const statusValues: JobStatus[] = [
+        'requested',
+        'quoted',
+        'accepted',
+        'running',
+        'delivered',
+        'failed',
+        'canceled',
+        'expired'
+      ];
+
+      let statuses: JobStatus[] = [];
+      if (statusParam) {
+        statuses = statusParam
+          .split(',')
+          .map((value) => value.trim())
+          .filter(Boolean)
+          .map((value) => value as JobStatus);
+        if (
+          statuses.length === 0 ||
+          statuses.some((status) => !statusValues.includes(status))
+        ) {
+          sendError(reply, 400, 'validation_error', 'Invalid status filter');
+          return;
+        }
+      } else {
+        statuses = ['requested', 'accepted', 'running'];
+      }
+
+      const fetchJobs = async () => {
+        let base = db
+          .selectFrom('jobs')
+          .where('seller_pubkey', '=', request.auth.pubkey);
+        if (statuses.length > 0) {
+          base = base.where('status', 'in', statuses);
+        }
+        if (updatedAfter) {
+          base = base.where('updated_at', '>', updatedAfter);
+        }
+
+        const totalRow = await base
+          .select((eb) => eb.fn.countAll().as('count'))
+          .executeTakeFirst();
+        const total = Number(totalRow?.count ?? 0);
+
+        let jobsQuery = base.selectAll();
+        if (updatedAfter) {
+          jobsQuery = jobsQuery.orderBy('updated_at', 'asc');
+        } else {
+          jobsQuery = jobsQuery.orderBy('created_at', 'desc');
+        }
+
+        const jobs = await jobsQuery.limit(limit).offset(offset).execute();
+        return { jobs, total };
+      };
+
+      const startedAt = Date.now();
+      let { jobs, total } = await fetchJobs();
+      if (jobs.length === 0 && waitMs > 0) {
+        metrics.inc('heartbeat.wait');
+        const waitResult = await waitForSellerUpdate(
+          request.auth.pubkey,
+          waitMs
+        );
+        metrics.inc('heartbeat.wait_result', { result: waitResult });
+        ({ jobs, total } = await fetchJobs());
+      }
+
+      reply.send({
+        jobs,
+        limit,
+        offset,
+        total,
+        waited_ms: Date.now() - startedAt
+      });
     }
   );
 
@@ -1350,7 +1341,6 @@ export const buildServer = async (databaseUrl?: string) => {
         .where('job_id', '=', jobId)
         .returningAll()
         .executeTakeFirst();
-      sendHint(job.seller_pubkey);
       if (updated) {
         recordJobTransition(request, updated, job.status, updated.status);
       }
@@ -1394,7 +1384,7 @@ export const buildServer = async (databaseUrl?: string) => {
         .where('job_id', '=', jobId)
         .returningAll()
         .executeTakeFirst();
-      sendHint(job.seller_pubkey);
+      notifySeller(job.seller_pubkey);
       reply.send({ job: updated });
     }
   );

@@ -149,6 +149,32 @@ Response 201:
 { "job": <Job> }
 ```
 
+### GET /v1/seller/heartbeat (seller)
+Advisory heartbeat endpoint with optional long‑polling.
+
+Auth: required (seller)
+
+Query parameters:
+- `status` (optional): comma-separated job status filters (default `requested,accepted,running`)
+- `limit` (optional, default 50, max 100)
+- `offset` (optional, default 0)
+- `updated_after` (optional): RFC 3339 timestamp; only return jobs with `updated_at` after this time
+- `wait_ms` (optional): long‑poll timeout in milliseconds (0..`RELAY_HEARTBEAT_MAX_WAIT_MS`)
+
+Response 200:
+```
+{
+  "jobs": [<Job>],
+  "limit": 50,
+  "offset": 0,
+  "total": 123,
+  "waited_ms": 1200
+}
+```
+Notes:
+- If no jobs match and `wait_ms` is set, the request waits until a seller‑relevant update occurs or the timeout elapses.
+- Heartbeat responses are hints; use `GET /v1/jobs` for full pagination and authoritative state.
+
 ### GET /v1/jobs (buyer/seller)
 List jobs visible to the authenticated caller.
 

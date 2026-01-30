@@ -1,7 +1,7 @@
 # NanoBazaar Relay v0 — Realtime Strategy (Low‑Cost Friendly)
 
 ## Summary
-Ship v0 with **advisory WebSocket hints + REST polling**, and add an **`updated_after` cursor** to `GET /v1/jobs` so polling is efficient. Internally emit job events with a consistent shape, even if they are not exposed yet. This keeps infra simple now and enables an easy upgrade to a **durable event stream (Option A)** later.
+Ship v0 with **advisory heartbeat hints + REST polling**, and add an **`updated_after` cursor** to `GET /v1/jobs` so polling is efficient. Internally emit job events with a consistent shape, even if they are not exposed yet. This keeps infra simple now and enables an easy upgrade to a **durable event stream (Option A)** later.
 
 ## Goals
 - Maintain outbound‑only seller operation.
@@ -15,7 +15,7 @@ Ship v0 with **advisory WebSocket hints + REST polling**, and add an **`updated_
 - Exactly‑once event processing semantics.
 
 ## Current Model (v0 baseline)
-- **WS** `/ws/seller` sends `hint.new_job` (advisory).
+- **Heartbeat** `GET /v1/seller/heartbeat` provides advisory hints (long-poll optional).
 - **REST** polling is authoritative (`GET /v1/jobs`).
 
 ## v0 Recommended Enhancements
@@ -54,9 +54,9 @@ On every job state change, emit an internal event with this shape:
 - If not stored, emit to logs only; keep code paths ready for persistence.
 
 ### 3) Polling guidance (seller)
-- Poll every 2–5 seconds (configurable).
-- On WS `hint.new_job`, trigger an immediate poll.
-- Use `updated_after` to avoid scanning old jobs.
+- Use `GET /v1/seller/heartbeat` with `wait_ms` for long-polling hints.
+- Poll `GET /v1/jobs` with `updated_after` for authoritative state.
+- Back off when idle; reset to a faster cadence when updates appear.
 
 ## API Spec Changes (v0)
 
@@ -72,6 +72,15 @@ Ordering:
 - If `updated_after` is set: `updated_at ASC`
 - Else: existing order (`created_at DESC`)
 
+### `GET /v1/seller/heartbeat`
+Query parameters:
+- `updated_after`: RFC 3339 timestamp
+- `status`: comma-separated job statuses (defaults to requested, accepted, running)
+- `wait_ms`: long-poll timeout (0..`RELAY_HEARTBEAT_MAX_WAIT_MS`)
+
+Response:
+- same shape as `GET /v1/jobs` plus `waited_ms`
+
 ## Compatibility
 - Existing clients unaffected.
 - New clients can opt‑in to `updated_after` without server‑side breaking changes.
@@ -85,7 +94,7 @@ When ready, add:
 
 ## Acceptance Criteria (v0)
 - Polling with `updated_after` returns only jobs updated after the cursor.
-- Sellers can recover from WS disconnects with no missed jobs.
+- Sellers can recover from heartbeat timeouts with no missed jobs.
 - No additional infra is required beyond current relay + Postgres.
 
 ## Notes

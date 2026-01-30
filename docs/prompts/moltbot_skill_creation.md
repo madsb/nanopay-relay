@@ -4,7 +4,7 @@ Assume the relay core is already implemented in the repo madsb/nanobazaar-relay 
 • spec/PRD.md
 • spec/API.md
 • spec/AUTH.md
-• spec/WS.md
+• spec/WS.md (heartbeat)
 • spec/LIMITS.md
 • spec/DB.md
 
@@ -13,7 +13,7 @@ docs/MOLTBOT_SKILL.md
 
 What exists already (context you must use):
 
-• Relay REST API + /ws/seller (advisory hint.new_job)
+• Relay REST API + /v1/seller/heartbeat (advisory)
 • ed25519 request signing for mutating endpoints
 • DB schema + migrations for offers/jobs/auth_nonces
 • Seller demo worker (currently mock payment verification)
@@ -28,7 +28,7 @@ Constraints (non‑negotiable):
 
 • Payments are peer‑to‑peer Nano; relay never holds or verifies funds.
 • Seller verifies payment.
-• Sellers should not open inbound ports; they connect outbound (WS + REST polling).
+• Sellers should not open inbound ports; they connect outbound (heartbeat + REST polling).
 • Keep API‑first. No UI requirements.
 • Use nanocurrency-js for wallet primitives; use Nano RPC for payment verification.
 

@@ -1,63 +1,32 @@
-# NanoBazaar Relay v0 WebSocket
+# NanoBazaar Relay v0 Heartbeat
 
 ## Endpoint
-- `WS /ws/seller`
-- JSON text frames only
-- The WebSocket is advisory; sellers must poll REST for authoritative state.
+- `GET /v1/seller/heartbeat`
+- JSON response
+- The heartbeat is advisory; sellers must still poll REST for authoritative state.
 
-## Message Envelope
-All messages are JSON objects with a `type` field.
-Unknown message types result in `type: "error"` and the connection is closed.
+## Query Params
+- `status` (comma-separated job statuses; default: `requested,accepted,running`)
+- `updated_after` (RFC 3339 timestamp)
+- `limit` (1-100, default 50)
+- `offset` (>= 0, default 0)
+- `wait_ms` (0..`RELAY_HEARTBEAT_MAX_WAIT_MS`, default 0)
 
-## Authentication Handshake
-
-### 1) Server -> Client: Challenge
+## Response
 ```
 {
-  "type": "auth.challenge",
-  "nonce": "hex",
-  "expires_at": "timestamp",
-  "server_time": "timestamp"
-}
-```
-- `nonce` is random and single-use.
-- Client must respond before `expires_at` (see `spec/LIMITS.md`).
-
-### 2) Client -> Server: Response
-```
-{
-  "type": "auth.response",
-  "pubkey": "hex",
-  "signature": "hex"
-}
-```
-- `signature` is an ed25519 signature over the UTF-8 bytes of the `nonce` string.
-
-### 3) Server -> Client: OK
-```
-{
-  "type": "auth.ok",
-  "seller_pubkey": "hex"
+  "jobs": [ ... ],
+  "limit": 50,
+  "offset": 0,
+  "total": 0,
+  "waited_ms": 1200
 }
 ```
 
-### 4) Server -> Client: Error (and close)
-```
-{
-  "type": "error",
-  "code": "auth.invalid_signature" | "auth.expired_challenge" | "auth.invalid_pubkey",
-  "message": "string"
-}
-```
-
-## Post-auth Messages
-
-### Server -> Client: New Job Hint
-```
-{ "type": "hint.new_job" }
-```
-- No job payload is included. Seller must poll `GET /v1/jobs/:id` or scan for `requested` jobs via existing offers.
+## Behavior
+- If matching jobs exist, the response returns immediately.
+- If no jobs match and `wait_ms > 0`, the request is held open until a seller-relevant update occurs or the timeout is reached.
+- Heartbeat responses are hints only; sellers should still use `GET /v1/jobs` for full pagination and authoritative state.
 
 ## Keepalive
-- Standard WebSocket ping/pong frames may be used by either side.
-- No JSON-level ping/pong messages are required.
+- Standard HTTP keepalive behavior applies.
