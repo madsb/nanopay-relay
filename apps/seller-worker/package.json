@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "tsx src/index.ts",
-    "cli": "tsx src/cli.ts"
+    "cli": "tsx src/cli.ts",
+    "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
     "@nanopay/relay-client": "workspace:*",
@@ -13,5 +14,8 @@
     "nanocurrency": "^2.5.0",
     "undici": "^6.17.0",
     "ws": "^8.17.1"
+  },
+  "devDependencies": {
+    "vitest": "^2.0.5"
   }
 }

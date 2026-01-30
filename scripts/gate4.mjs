@@ -11,6 +11,7 @@ const run = (command, args, options = {}) =>
 
 try {
   await run('node', ['scripts/gate3.mjs']);
+  await run('pnpm', ['--filter', '@nanopay/seller-worker', 'test']);
   process.exit(0);
 } catch (error) {
   console.error(error instanceof Error ? error.message : error);
