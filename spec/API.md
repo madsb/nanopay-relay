@@ -57,7 +57,7 @@
   "payment_sweep_tx_hash": "string" | null,
   "lock_owner": "hex" | null,
   "lock_expires_at": "timestamp" | null,
-  "result_payload": { } | null,
+  "result_url": "string" | null,
   "error": { } | null,
   "created_at": "timestamp",
   "updated_at": "timestamp"
@@ -253,14 +253,14 @@ Auth: required (seller; must match job.seller_pubkey)
 Request JSON (success):
 ```
 {
-  "result_payload": { },
+  "result_url": "string",
   "error": null
 }
 ```
 Request JSON (failure):
 ```
 {
-  "result_payload": null,
+  "result_url": null,
   "error": {
     "code": "string",
     "message": "string",
@@ -270,7 +270,7 @@ Request JSON (failure):
 ```
 Rules:
 - Job must be `running`.
-- Exactly one of `result_payload` or `error` must be non-null.
+- Exactly one of `result_url` or `error` must be non-null.
 
 Response 200:
 ```

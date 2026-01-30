@@ -46,7 +46,7 @@ export type Job = {
   payment_sweep_tx_hash: string | null;
   lock_owner: string | null;
   lock_expires_at: string | null;
-  result_payload: unknown | null;
+  result_url: string | null;
   error: unknown | null;
   created_at: string;
   updated_at: string;
@@ -119,7 +119,7 @@ export type PaymentInput = {
 };
 
 export type DeliverInput = {
-  result_payload?: unknown | null;
+  result_url?: string | null;
   error?: unknown | null;
 };
 

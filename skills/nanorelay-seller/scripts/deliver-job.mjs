@@ -8,26 +8,23 @@ if (!jobId || typeof jobId !== 'string') {
   process.exit(1);
 }
 
-const resultPayload = await readJsonArg({
-  jsonValue: args.result,
-  filePath: args['result-file']
-});
+const resultUrl = typeof args['result-url'] === 'string' ? args['result-url'] : undefined;
 const errorPayload = await readJsonArg({
   jsonValue: args.error,
   filePath: args['error-file']
 });
 
-const hasResult = resultPayload !== undefined && resultPayload !== null;
+const hasResult = resultUrl !== undefined && resultUrl !== null;
 const hasError = errorPayload !== undefined && errorPayload !== null;
 
 if (hasResult === hasError) {
-  console.error('Provide exactly one of --result/--result-file or --error/--error-file');
+  console.error('Provide exactly one of --result-url or --error/--error-file');
   process.exit(1);
 }
 
 const client = createClient();
 const result = await client.deliverJob(jobId, {
-  result_payload: hasResult ? resultPayload : null,
+  result_url: hasResult ? resultUrl : null,
   error: hasError ? errorPayload : null
 });
 printResult(result);

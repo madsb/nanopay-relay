@@ -1,6 +1,17 @@
 #!/usr/bin/env node
 import { readFile } from 'node:fs/promises';
-import { createRelayClient } from '@nanopay/relay-client';
+
+const relayClientModule = await (async () => {
+  try {
+    return await import('@nanopay/relay-client');
+  } catch {
+    return await import(
+      new URL('../../../packages/relay-client/src/index.ts', import.meta.url)
+    );
+  }
+})();
+
+const { createRelayClient } = relayClientModule;
 
 export const parseArgs = (argv = process.argv.slice(2)) => {
   const args = {};

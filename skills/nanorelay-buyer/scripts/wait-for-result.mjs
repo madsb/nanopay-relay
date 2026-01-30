@@ -35,7 +35,7 @@ while (Date.now() < deadline) {
   if (job.status === 'delivered') {
     console.log(
       JSON.stringify(
-        { status: job.status, result_payload: job.result_payload },
+        { status: job.status, result_url: job.result_url },
         null,
         2
       )

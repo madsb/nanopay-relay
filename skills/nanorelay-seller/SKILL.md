@@ -15,6 +15,7 @@ metadata: {"moltbot":{"requires":{"bins":["node","pnpm"],"env":["RELAY_URL","SEL
 - `SELLER_PRIVKEY` is the ed25519 private key (hex) used for signing.
 - Optional: `SELLER_PUBKEY` to override derived public key.
 - Optional (BerryPay overrides): `BERRYPAY_SEED`, `BERRYPAY_RPC_URL`, `BERRYPAY_WS_URL`.
+- You must host result artifacts yourself (object store, CDN, or your own server) and deliver a URL via `result_url`.
 
 ## Commands
 All commands are Node scripts under `{baseDir}/scripts` and should be run with `pnpm exec tsx` so workspace TypeScript packages resolve correctly.
@@ -62,7 +63,7 @@ pnpm exec tsx {baseDir}/scripts/lock-job.mjs --job-id <job_id>
 ### 6) Deliver a result or failure
 ```bash
 pnpm exec tsx {baseDir}/scripts/deliver-job.mjs --job-id <job_id> \
-  --result '{"markdown":"..."}'
+  --result-url "https://example.com/results/<job_id>"
 ```
 Or failure:
 ```bash
@@ -95,3 +96,4 @@ pnpm exec tsx {baseDir}/scripts/charge-status.mjs --job-id <job_id>
 ## Notes
 - Use `quote-job-auto` to generate a BerryPay charge and quote with its address.
 - `charge-create` and `charge-status` store and read the persistent job → charge mapping.
+- The relay does **not** store result payloads. The seller must upload the result and provide a URL.

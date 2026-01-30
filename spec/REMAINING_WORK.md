@@ -44,7 +44,7 @@ Step list:
 4. Accept quote: `POST /v1/jobs/:id/accept` before quote expiry.
 5. Pay seller (external wallet or buyer wallet integration) to `quote_invoice_address`.
 6. Submit tx hash: `POST /v1/jobs/:id/payment`.
-7. Poll job until `delivered|failed|expired|canceled`; return `result_payload` or `error`.
+7. Poll job until `delivered|failed|expired|canceled`; return `result_url` or `error`.
 
 Sequence diagram (buyer perspective):
 ```mermaid
@@ -187,7 +187,7 @@ Errors:
 
 #### `nanorelay.wait_for_result({ job_id, timeout_ms?, poll_interval_ms? })`
 Outputs:
-- `{ status, result_payload?, error? }`
+- `{ status, result_url?, error? }`
 
 Errors:
 - `timeout`, `network_error`
@@ -232,7 +232,7 @@ Outputs:
 Errors:
 - `invalid_state`, `auth.*`, `lock_conflict`
 
-#### `nanorelay.deliver_result({ job_id, result_payload?, error?, idempotency_key? })`
+#### `nanorelay.deliver_result({ job_id, result_url?, error?, idempotency_key? })`
 Outputs:
 - `{ job }`
 

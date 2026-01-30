@@ -18,7 +18,7 @@ const parseEnvInt = (name: string, fallback: number): number => {
 
 const BODY_LIMIT_BYTES = 300 * 1024;
 const MAX_REQUEST_PAYLOAD_BYTES = 64 * 1024;
-const MAX_RESULT_PAYLOAD_BYTES = 256 * 1024;
+const MAX_RESULT_URL_LEN = 2048;
 const MAX_ERROR_BYTES = 8 * 1024;
 const MAX_TITLE_LEN = 120;
 const MAX_DESC_LEN = 2000;
@@ -774,10 +774,17 @@ export const buildServer = async (databaseUrl?: string) => {
     payment_tx_hash: z.string().min(1).max(MAX_PAYMENT_HASH_LEN)
   });
 
-  const DeliverSchema = z.object({
-    result_payload: z.unknown().nullable(),
-    error: z.unknown().nullable()
-  });
+  const DeliverSchema = z
+    .object({
+      result_url: z
+        .string()
+        .min(1)
+        .max(MAX_RESULT_URL_LEN)
+        .optional()
+        .nullable(),
+      error: z.unknown().optional().nullable()
+    })
+    .strict();
 
   const CancelSchema = z.object({
     reason: z.string().max(200).optional().nullable()
@@ -806,6 +813,7 @@ export const buildServer = async (databaseUrl?: string) => {
       .where('job_id', '=', jobId)
       .returningAll()
       .executeTakeFirst();
+
 
   const recordJobTransition = (
     request: FastifyRequest,
@@ -1052,6 +1060,7 @@ export const buildServer = async (databaseUrl?: string) => {
           payment_sweep_tx_hash: null,
           lock_owner: null,
           lock_expires_at: null,
+          result_url: null,
           result_payload: null,
           error: null
         })
@@ -1419,30 +1428,19 @@ export const buildServer = async (databaseUrl?: string) => {
         return;
       }
 
-      const { result_payload, error } = parsed.data;
-      const hasResult = result_payload !== null && result_payload !== undefined;
+      const { result_url, error } = parsed.data;
+      const hasResult = result_url !== null && result_url !== undefined;
       const hasError = error !== null && error !== undefined;
       if ((hasResult && hasError) || (!hasResult && !hasError)) {
         sendError(
           reply,
           400,
           'validation_error',
-          'Provide either result_payload or error'
+          'Provide either result_url or error'
         );
         return;
       }
 
-      if (
-        hasResult &&
-        !requireJsonSize(
-          reply,
-          result_payload,
-          MAX_RESULT_PAYLOAD_BYTES,
-          'result_payload'
-        )
-      ) {
-        return;
-      }
       if (hasError && !requireJsonSize(reply, error, MAX_ERROR_BYTES, 'error')) {
         return;
       }
@@ -1451,7 +1449,8 @@ export const buildServer = async (databaseUrl?: string) => {
         .updateTable('jobs')
         .set({
           status: hasResult ? 'delivered' : 'failed',
-          result_payload: hasResult ? result_payload : null,
+          result_url: hasResult ? result_url : null,
+          result_payload: null,
           error: hasError ? error : null
         })
         .where('job_id', '=', jobId)

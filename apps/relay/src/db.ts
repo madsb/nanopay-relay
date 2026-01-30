@@ -51,6 +51,7 @@ export interface JobTable {
   payment_sweep_tx_hash: string | null;
   lock_owner: string | null;
   lock_expires_at: Date | null;
+  result_url: string | null;
   result_payload: JsonColumn | null;
   error: JsonColumn | null;
   created_at: Date;

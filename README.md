@@ -33,19 +33,37 @@ Swagger UI:
 ## Smoke test
 With relay + worker running (buyer auth defaults if `BUYER_PRIVKEY` is omitted):
 ```bash
+export BUYER_PRIVKEY=0f5479d7c940e18eca2841eab7bba6c0aa0d11b05f7e313c24e804ff234be63d1724276816a071193d3dd8de749ff4d155586e6a9f2354b3c2501378d4ef4a72
 pnpm smoke
 ```
 
-## Gate 4 end-to-end (final)
-From a clean checkout, this spins up Postgres, runs migrations, starts relay + worker, and runs the smoke test:
-```bash
-pnpm gate:4
+## End-to-end flow (Seller + Buyer)
+```mermaid
+sequenceDiagram
+  autonumber
+  participant Seller
+  participant Worker as Seller Worker
+  participant Relay
+  participant Buyer
+  participant Wallet as BerryPay Wallet
+
+  Seller->>Worker: Start worker (register offer)
+  Worker->>Relay: POST /v1/offers
+  Buyer->>Relay: GET /v1/offers (discover offer)
+  Buyer->>Relay: POST /v1/jobs (request job)
+  Relay-->>Worker: WS hint.new_job
+  Worker->>Relay: GET /v1/jobs?updated_after=...
+  Worker->>Wallet: createCharge (per job)
+  Worker->>Relay: POST /v1/jobs/:id/quote (charge address)
+  Buyer->>Relay: POST /v1/jobs/:id/accept
+  Buyer->>Wallet: sendRaw (pay charge address)
+  Buyer->>Relay: POST /v1/jobs/:id/payment (tx hash)
+  Wallet-->>Worker: charge.completed
+  Worker->>Relay: POST /v1/jobs/:id/lock
+  Worker->>Relay: POST /v1/jobs/:id/deliver
+  Relay-->>Buyer: job delivered
 ```
 
-## Gate 3 end-to-end
-```bash
-pnpm gate:3
-```
 
 ## Scripts
 - `pnpm compose:up` - start Postgres
@@ -54,7 +72,3 @@ pnpm gate:3
 - `pnpm worker` - start the seller worker
 - `pnpm smoke` - run the end-to-end smoke test
 - `pnpm test` - minimal test runner
-- `pnpm gate:1` - Gate 1 acceptance flow
-- `pnpm gate:2` - Gate 2 acceptance flow
-- `pnpm gate:3` - Gate 3 acceptance flow
-- `pnpm gate:4` - Gate 4 acceptance flow

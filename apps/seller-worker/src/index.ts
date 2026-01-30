@@ -43,6 +43,11 @@ const chargeTimeoutMs = parseEnvInt(
   process.env.CHARGE_TIMEOUT_MS,
   quoteExpiresMs
 );
+const resultUrlTemplate =
+  process.env.RESULT_URL_TEMPLATE ?? 'https://example.com/jobs/{job_id}';
+
+const buildResultUrl = (jobId: string) =>
+  resultUrlTemplate.replace('{job_id}', jobId);
 
 if (!sellerPrivkey) {
   console.error('SELLER_PRIVKEY is required');
@@ -259,7 +264,7 @@ const lockJob = async (jobId: string) =>
   apiRequest<{ job: Job }>('POST', `/v1/jobs/${jobId}/lock`, {});
 
 type DeliveryPayload = {
-  result_payload: unknown | null;
+  result_url: string | null;
   error: unknown | null;
 };
 
@@ -456,16 +461,18 @@ const getOrCreateDelivery = async (job: Job): Promise<DeliveryPayload> => {
     const result = await Promise.resolve(executeJob(job.request_payload));
     if (result === undefined) {
       delivery = {
-        result_payload: null,
+        result_url: null,
         error: { message: 'Job execution returned no result' }
       };
     } else {
-      delivery = { result_payload: result, error: null };
+      delivery = { result_url: buildResultUrl(job.job_id), error: null };
     }
   } catch (error) {
     delivery = {
-      result_payload: null,
-      error: { message: String(error) }
+      result_url: null,
+      error: {
+        message: error instanceof Error ? error.message : 'Job execution failed'
+      }
     };
   }
   pendingDeliveries.set(job.job_id, delivery);

@@ -2,7 +2,7 @@
 
 ## Payload Caps
 - `request_payload`: max 64 KiB (65,536 bytes) of UTF-8 JSON
-- `result_payload`: max 256 KiB (262,144 bytes) of UTF-8 JSON
+- `result_url`: max 2,048 chars
 - `error`: max 8 KiB (8,192 bytes) of UTF-8 JSON
 - Max total request body size: 300 KiB
 

@@ -180,7 +180,7 @@ describe('relay api', () => {
       method: 'POST',
       url: `/v1/jobs/${job.job_id}/deliver`,
       body: {
-        result_payload: { markdown: '# Hello' },
+        result_url: 'https://example.com/results/job-1',
         error: null
       },
       keypair: seller
@@ -194,9 +194,9 @@ describe('relay api', () => {
       keypair: buyer
     });
     expect(getRes.statusCode).toBe(200);
-    expect(JSON.parse(getRes.body).job.result_payload).toEqual({
-      markdown: '# Hello'
-    });
+    expect(JSON.parse(getRes.body).job.result_url).toBe(
+      'https://example.com/results/job-1'
+    );
   });
 
   it('replays idempotent requests and rejects conflicts', async () => {

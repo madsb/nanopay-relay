@@ -52,7 +52,8 @@ Columns:
 - `payment_sweep_tx_hash` text null
 - `lock_owner` text null
 - `lock_expires_at` timestamptz null
-- `result_payload` jsonb null
+- `result_url` text null
+- `result_payload` jsonb null (deprecated; always null)
 - `error` jsonb null
 - `created_at` timestamptz not null default now()
 - `updated_at` timestamptz not null default now()
@@ -60,9 +61,9 @@ Columns:
 Constraints:
 - If `status` in ('quoted','accepted','running','delivered','failed') then `quote_amount_raw` and `quote_invoice_address` must be not null
 - If `status` in ('running','delivered','failed') then `payment_tx_hash` must be not null
-- If `status` = 'delivered' then `result_payload` not null and `error` is null
-- If `status` = 'failed' then `error` not null
-- If `status` in ('canceled','expired') then `result_payload` is null and `error` is null
+- If `status` = 'delivered' then `result_url` not null and `error` is null
+- If `status` = 'failed' then `error` not null and `result_url` is null
+- If `status` in ('canceled','expired') then `result_url` is null and `error` is null
 - If `lock_owner` is not null then `lock_expires_at` is not null
 
 Indexes:

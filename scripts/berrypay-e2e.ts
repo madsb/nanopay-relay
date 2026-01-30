@@ -1,4 +1,5 @@
 import { randomBytes } from 'node:crypto';
+import { spawn } from 'node:child_process';
 import { setTimeout as delay } from 'node:timers/promises';
 import { fetch } from 'undici';
 import {
@@ -7,6 +8,12 @@ import {
 } from '@nanopay/shared';
 
 const relayUrl = process.env.RELAY_URL ?? 'http://localhost:3000';
+const offerTag = process.env.OFFER_TAG ?? 'web_extract';
+
+if (process.env.BERRYPAY_E2E !== '1') {
+  console.error('Set BERRYPAY_E2E=1 to run (sends real Nano).');
+  process.exit(1);
+}
 
 const buyerPrivkey =
   process.env.BUYER_PRIVKEY ??
@@ -15,17 +22,18 @@ const buyerPrivkey =
 const buyerPubkey = publicKeyFromPrivateKeyHex(buyerPrivkey);
 
 type Offer = { offer_id: string };
+
 type Job = {
   job_id: string;
   status: string;
+  quote_invoice_address: string | null;
+  quote_amount_raw: string | null;
+  payment_charge_id: string | null;
+  payment_charge_address: string | null;
   result_url: string | null;
 };
 
-const buildAuthHeaders = (
-  method: string,
-  path: string,
-  body: Buffer
-) => {
+const buildAuthHeaders = (method: string, path: string, body: Buffer) => {
   const timestamp = Math.floor(Date.now() / 1000).toString();
   const nonce = randomBytes(16).toString('hex');
   const signature = signCanonical({
@@ -73,7 +81,7 @@ const waitForOffer = async () => {
   const deadline = Date.now() + 20000;
   while (Date.now() < deadline) {
     const response = await fetch(
-      `${relayUrl}/v1/offers?tags=web_extract&limit=1`
+      `${relayUrl}/v1/offers?tags=${encodeURIComponent(offerTag)}&limit=1`
     );
     if (response.ok) {
       const data = (await response.json()) as { offers: Offer[] };
@@ -85,7 +93,7 @@ const waitForOffer = async () => {
 };
 
 const waitForStatus = async (jobId: string, target: string) => {
-  const deadline = Date.now() + 60000;
+  const deadline = Date.now() + 120000;
   while (Date.now() < deadline) {
     const response = await signedRequest<{ job: Job }>(
       'GET',
@@ -104,10 +112,72 @@ const waitForStatus = async (jobId: string, target: string) => {
   throw new Error(`Timeout waiting for ${target}`);
 };
 
+const runPayInvoice = async (jobId: string) => {
+  const args = [
+    'exec',
+    'tsx',
+    'skills/nanorelay-buyer/scripts/pay-invoice.mjs',
+    '--job-id',
+    jobId
+  ];
+
+  return new Promise<Record<string, unknown>>((resolve, reject) => {
+    const child = spawn('pnpm', args, {
+      env: {
+        ...process.env,
+        BUYER_PRIVKEY: buyerPrivkey,
+        RELAY_URL: relayUrl
+      },
+      stdio: ['ignore', 'pipe', 'pipe']
+    });
+
+    let stdout = '';
+    let stderr = '';
+
+    child.stdout.on('data', (chunk) => {
+      const text = chunk.toString('utf8');
+      stdout += text;
+      process.stdout.write(text);
+    });
+
+    child.stderr.on('data', (chunk) => {
+      const text = chunk.toString('utf8');
+      stderr += text;
+      process.stderr.write(text);
+    });
+
+    child.on('error', (error) => {
+      reject(error);
+    });
+
+    child.on('close', (code) => {
+      if (code !== 0) {
+        reject(new Error(`pay-invoice failed (${code}): ${stderr || stdout}`));
+        return;
+      }
+      const trimmed = stdout.trim();
+      if (!trimmed) {
+        resolve({});
+        return;
+      }
+      try {
+        resolve(JSON.parse(trimmed));
+      } catch {
+        const lastLine = trimmed.split('\n').pop() ?? '';
+        try {
+          resolve(JSON.parse(lastLine));
+        } catch {
+          resolve({ raw: trimmed });
+        }
+      }
+    });
+  });
+};
+
 const main = async () => {
   const offer = await waitForOffer();
   if (!offer) {
-    throw new Error('No offers found for tag web_extract');
+    throw new Error(`No offers found for tag ${offerTag}`);
   }
 
   const jobResponse = await signedRequest<{ job: Job }>('POST', '/v1/jobs', {
@@ -119,7 +189,12 @@ const main = async () => {
   }
 
   const jobId = jobResponse.data.job.job_id;
-  await waitForStatus(jobId, 'quoted');
+  const quoted = await waitForStatus(jobId, 'quoted');
+  const address = quoted.quote_invoice_address;
+  const amountRaw = quoted.quote_amount_raw;
+  if (!address || !amountRaw) {
+    throw new Error('Quote missing address or amount');
+  }
 
   const acceptResponse = await signedRequest(
     'POST',
@@ -130,21 +205,24 @@ const main = async () => {
     throw new Error('Failed to accept job');
   }
 
-  const paymentResponse = await signedRequest(
-    'POST',
-    `/v1/jobs/${jobId}/payment`,
-    { payment_tx_hash: 'TEST_PAYMENT_HASH' }
-  );
-  if (paymentResponse.status !== 200) {
-    throw new Error('Failed to submit payment hash');
-  }
+  const paymentResult = await runPayInvoice(jobId);
+  const txHash =
+    typeof paymentResult.payment_tx_hash === 'string'
+      ? paymentResult.payment_tx_hash
+      : undefined;
 
   const delivered = await waitForStatus(jobId, 'delivered');
   if (!delivered.result_url) {
     throw new Error('Missing result URL');
   }
 
-  console.log('Smoke success');
+  console.log('BerryPay E2E success', {
+    job_id: jobId,
+    payment_tx_hash: txHash ?? 'unknown',
+    payment_charge_id: delivered.payment_charge_id,
+    payment_charge_address: delivered.payment_charge_address,
+    result_url: delivered.result_url
+  });
 };
 
 void main().catch((error) => {

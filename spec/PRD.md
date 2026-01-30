@@ -175,7 +175,7 @@ Relay requirements:
 | payment_tx_hash       | text (nullable)        |
 | lock_owner            | text (nullable)        |
 | lock_expires_at       | timestamptz (nullable) |
-| result_payload        | jsonb (nullable)       |
+| result_url            | text (nullable)        |
 | error                 | jsonb (nullable)       |
 | created_at            | timestamptz            |
 | updated_at            | timestamptz            |
@@ -296,7 +296,7 @@ Seller must poll REST for authoritative state.
 ## 10. Payload Limits (Hard)
 
 * request_payload: max **64 KB**
-* result_payload: max **256 KB**
+* result_url: max **2048 chars**
 * JSON only
 * No file uploads
 

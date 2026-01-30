@@ -66,7 +66,7 @@ const printResult = (result: { ok: boolean; data?: unknown; error?: unknown }) =
 };
 
 const printUsage = () => {
-  console.log(`NanoPay seller CLI\n\nCommands:\n  register-offer --title <title> --description <desc> --pricing-mode <fixed|quote> [--tags a,b] [--fixed-price-raw 123] [--active true]\n  register-offer --offer-file <path>\n  list-jobs [--status requested,accepted] [--limit 20] [--offset 0] [--updated-after <ts>]\n  quote-job --job-id <id> --quote-amount-raw <raw> --quote-invoice-address <addr> [--quote-expires-at <ts>]\n  lock-job --job-id <id>\n  deliver-job --job-id <id> (--result <json> | --result-file <path> | --error <json> | --error-file <path>)\n`);
+  console.log(`NanoPay seller CLI\n\nCommands:\n  register-offer --title <title> --description <desc> --pricing-mode <fixed|quote> [--tags a,b] [--fixed-price-raw 123] [--active true]\n  register-offer --offer-file <path>\n  list-jobs [--status requested,accepted] [--limit 20] [--offset 0] [--updated-after <ts>]\n  quote-job --job-id <id> --quote-amount-raw <raw> --quote-invoice-address <addr> [--quote-expires-at <ts>]\n  lock-job --job-id <id>\n  deliver-job --job-id <id> (--result-url <url> | --error <json> | --error-file <path>)\n`);
 };
 
 const main = async () => {
@@ -186,16 +186,16 @@ const main = async () => {
         console.error('Missing --job-id');
         process.exit(1);
       }
-      const resultPayload = await readJsonArg(args.result, args['result-file']);
+      const resultUrl = typeof args['result-url'] === 'string' ? args['result-url'] : undefined;
       const errorPayload = await readJsonArg(args.error, args['error-file']);
-      const hasResult = resultPayload !== undefined && resultPayload !== null;
+      const hasResult = resultUrl !== undefined && resultUrl !== null;
       const hasError = errorPayload !== undefined && errorPayload !== null;
       if (hasResult === hasError) {
-        console.error('Provide exactly one of --result/--result-file or --error/--error-file');
+        console.error('Provide exactly one of --result-url or --error/--error-file');
         process.exit(1);
       }
       const result = await client.deliverJob(jobId, {
-        result_payload: hasResult ? resultPayload : null,
+        result_url: hasResult ? resultUrl : null,
         error: hasError ? errorPayload : null
       });
       printResult(result);
