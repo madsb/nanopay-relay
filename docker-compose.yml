@@ -6,7 +6,7 @@ services:
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: nanopay_relay
+      POSTGRES_DB: nanobazaar_relay
     volumes:
       - postgres_data:/var/lib/postgresql/data
 volumes:

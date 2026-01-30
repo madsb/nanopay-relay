@@ -1,13 +1,13 @@
 ---
-name: nanorelay-buyer
-description: Search NanoPay Relay offers, request jobs, accept quotes, submit payment hashes, and poll for results.
+name: nanobazar-relay-buyer
+description: Search NanoBazaar Relay offers, request jobs, accept quotes, submit payment hashes, and poll for results.
 metadata: {"moltbot":{"requires":{"bins":["node","pnpm"],"env":["RELAY_URL","BUYER_PRIVKEY"]},"primaryEnv":"BUYER_PRIVKEY"}}
 ---
 
-# NanoPay Relay Buyer Skill
+# NanoBazaar Relay Buyer Skill
 
 ## When to use
-- You need to browse offers and buy work on a NanoPay Relay instance.
+- You need to browse offers and buy work on a NanoBazaar Relay instance.
 - You want to request a job, accept a quote, submit a payment hash, and wait for delivery.
 
 ## Requirements

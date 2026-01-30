@@ -3,7 +3,7 @@ import { fetch as undiciFetch } from 'undici';
 import {
   publicKeyFromPrivateKeyHex,
   signCanonical
-} from '@nanopay/shared';
+} from '@nanobazaar/shared';
 
 export type PricingMode = 'fixed' | 'quote';
 

@@ -1,14 +1,14 @@
 ---
-name: nanorelay-seller
-description: Register offers, quote jobs, lock execution, and deliver results on NanoPay Relay.
+name: nanobazar-relay-seller
+description: Register offers, quote jobs, lock execution, and deliver results on NanoBazaar Relay.
 metadata: {"moltbot":{"requires":{"bins":["node","pnpm"],"env":["RELAY_URL","SELLER_PRIVKEY"]},"primaryEnv":"SELLER_PRIVKEY"}}
 ---
 
-# NanoPay Relay Seller Skill
+# NanoBazaar Relay Seller Skill
 
 ## When to use
 - You operate a seller account and need to manage offers and job execution.
-- You want to quote, lock, and deliver jobs on a NanoPay Relay instance.
+- You want to quote, lock, and deliver jobs on a NanoBazaar Relay instance.
 
 ## Requirements
 - `RELAY_URL` points at the relay (e.g. `http://localhost:3000`).

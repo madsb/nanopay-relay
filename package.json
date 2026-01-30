@@ -1,5 +1,5 @@
 {
-  "name": "nanopay-relay",
+  "name": "nanobazaar-relay",
   "version": "0.0.0",
   "private": true,
   "packageManager": "pnpm@9.15.0",
@@ -11,14 +11,14 @@
     "compose:up": "docker compose up -d postgres",
     "compose:down": "docker compose down",
     "migrate": "node scripts/migrate.mjs",
-    "dev": "pnpm --filter @nanopay/relay dev",
-    "worker": "pnpm --filter @nanopay/seller-worker dev",
+    "dev": "pnpm --filter @nanobazaar/relay dev",
+    "worker": "pnpm --filter @nanobazaar/seller-worker dev",
     "smoke": "tsx scripts/smoke.ts",
     "berrypay:e2e": "tsx scripts/berrypay-e2e.ts",
-    "test": "pnpm --filter @nanopay/relay test"
+    "test": "pnpm --filter @nanobazaar/relay test"
   },
   "devDependencies": {
-    "@nanopay/shared": "workspace:*",
+    "@nanobazaar/shared": "workspace:*",
     "@types/node": "^20.11.30",
     "tsx": "^4.19.2",
     "typescript": "^5.5.4",

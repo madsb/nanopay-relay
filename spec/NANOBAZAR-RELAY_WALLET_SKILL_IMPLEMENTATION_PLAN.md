@@ -5,19 +5,21 @@ Implement frictionless autonomous Nano payments for buyer and seller skills by a
 
 ## Phase 1 — Foundations
 - Add `berrypay` (SDK) and `qrcode` to workspace dependencies.
-- Create shared helper module `skills/nanorelay-common/berrypay.mjs`:
+- Add per-skill helper modules:
+  - `skills/nanobazar-relay-buyer/scripts/berrypay.mjs`
+  - `skills/nanobazar-relay-seller/scripts/berrypay.mjs`
   - Wallet init, balance, receive, send, charge create/status/listen.
   - Raw↔Nano conversion helpers.
-- Define persistent mapping file for `job_id -> charge_id` (e.g. `~/.nanopay-relay/charge-map.json`).
+- Define persistent mapping file for `job_id -> charge_id` (e.g. `~/.nanobazaar-relay/charge-map.json`).
 
 ## Phase 2 — Buyer Skill Automation
-- Add scripts to `skills/nanorelay-buyer/scripts`:
+- Add scripts to `skills/nanobazar-relay-buyer/scripts`:
   - `wallet-init.mjs`, `wallet-balance.mjs`, `wallet-receive.mjs`.
   - `pay-invoice.mjs` (send + submit payment hash).
 - Update buyer `SKILL.md` with new commands and env vars.
 
 ## Phase 3 — Seller Skill + Worker Integration
-- Add scripts to `skills/nanorelay-seller/scripts`:
+- Add scripts to `skills/nanobazar-relay-seller/scripts`:
   - `wallet-init.mjs`, `wallet-balance.mjs`, `wallet-receive.mjs`.
   - `charge-create.mjs`, `charge-status.mjs`, `quote-job-auto.mjs`.
 - Update seller worker:

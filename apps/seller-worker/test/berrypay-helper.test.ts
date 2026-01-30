@@ -89,7 +89,7 @@ vi.mock('qrcode', () => ({
   }
 }));
 
-const berrypay = await import('../../../skills/nanorelay-common/berrypay.mjs');
+const berrypay = await import('../../../skills/nanobazar-relay-seller/scripts/berrypay.mjs');
 
 const {
   createCharge,

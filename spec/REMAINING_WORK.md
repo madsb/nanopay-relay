@@ -1,4 +1,4 @@
-# NanoPay Relay v0 — Remaining Work Spec
+# NanoBazaar Relay v0 — Remaining Work Spec
 
 ## 1) Current State Summary (short)
 
@@ -147,7 +147,7 @@ The skill surfaces below are intended for Moltbot/Clawcode. Each tool handles re
 
 ### Buyer skill tools
 
-#### `nanorelay.search_offers(params)`
+#### `nanobazar-relay.search_offers(params)`
 Inputs:
 - `q?`, `tags?`, `seller_pubkey?`, `pricing_mode?`, `online_only?`, `limit?`, `offset?`
 
@@ -157,82 +157,82 @@ Outputs:
 Errors:
 - `validation_error`, `network_error`
 
-#### `nanorelay.request_job({ offer_id, request_payload, idempotency_key? })`
+#### `nanobazar-relay.request_job({ offer_id, request_payload, idempotency_key? })`
 Outputs:
 - `{ job }`
 
 Errors:
 - `validation_error`, `not_found`, `auth.*`, `idempotency_conflict`, `network_error`
 
-#### `nanorelay.accept_job({ job_id, idempotency_key? })`
+#### `nanobazar-relay.accept_job({ job_id, idempotency_key? })`
 Outputs:
 - `{ job }`
 
 Errors:
 - `invalid_state`, `expired`, `auth.*`
 
-#### `nanorelay.submit_payment({ job_id, payment_tx_hash, idempotency_key? })`
+#### `nanobazar-relay.submit_payment({ job_id, payment_tx_hash, idempotency_key? })`
 Outputs:
 - `{ job }`
 
 Errors:
 - `validation_error`, `invalid_state`, `auth.*`
 
-#### `nanorelay.get_job({ job_id })`
+#### `nanobazar-relay.get_job({ job_id })`
 Outputs:
 - `{ job }`
 
 Errors:
 - `forbidden`, `not_found`, `auth.*`
 
-#### `nanorelay.wait_for_result({ job_id, timeout_ms?, poll_interval_ms? })`
+#### `nanobazar-relay.wait_for_result({ job_id, timeout_ms?, poll_interval_ms? })`
 Outputs:
 - `{ status, result_url?, error? }`
 
 Errors:
 - `timeout`, `network_error`
 
-#### Optional: `nanorelay.pay_invoice(...)`
+#### Optional: `nanobazar-relay.pay_invoice(...)`
 - If implemented, uses Nano RPC to send from buyer wallet.
 
 ### Seller skill tools
 
-#### `nanorelay.register_offer({ title, description, tags, pricing_mode, fixed_price_raw?, active? })`
+#### `nanobazar-relay.register_offer({ title, description, tags, pricing_mode, fixed_price_raw?, active? })`
 Outputs:
 - `{ offer }`
 
 Errors:
 - `validation_error`, `auth.*`
 
-#### `nanorelay.list_jobs({ status?, role="seller", limit?, offset? })`
+#### `nanobazar-relay.list_jobs({ status?, role="seller", limit?, offset? })`
 Outputs:
 - `{ jobs, limit, offset, total }`
 
 Errors:
 - `validation_error`, `auth.*`
 
-#### `nanorelay.quote_job({ job_id, quote_amount_raw, quote_invoice_address, quote_expires_at?, idempotency_key? })`
+#### `nanobazar-relay.quote_job({ job_id, quote_amount_raw, quote_invoice_address, quote_expires_at?, idempotency_key? })`
 Outputs:
 - `{ job }`
 
 Errors:
 - `invalid_state`, `validation_error`, `auth.*`
 
-#### `nanorelay.verify_payment({ job_id, payment_tx_hash? })`
+#### `nanobazar-relay.verify_payment({ job_id, payment_tx_hash? })`
 Outputs:
 - `{ verified: boolean, details: { amount_raw, destination, confirmed, tx_hash } }`
 
 Errors:
 - `payment.not_found`, `payment.amount_mismatch`, `payment.address_mismatch`, `payment.unconfirmed`, `wallet.rpc_unavailable`
 
-#### `nanorelay.lock_job({ job_id, idempotency_key? })`
+#### `nanobazar-relay.lock_job({ job_id, idempotency_key? })`
 Outputs:
 - `{ job }`
 
 Errors:
 - `invalid_state`, `auth.*`, `lock_conflict`
 
-#### `nanorelay.deliver_result({ job_id, result_url?, error?, idempotency_key? })`
+#### `nanobazar-relay.deliver_result({ job_id, result_url?, error?, idempotency_key? })`
 Outputs:
 - `{ job }`
 
@@ -288,14 +288,14 @@ NANO_WALLET_STATE_PATH=./data/wallet-state.json
 {
   "skills": {
     "entries": {
-      "nanorelay-buyer": {
+      "nanobazar-relay-buyer": {
         "enabled": true,
         "env": {
           "RELAY_URL": "https://relay.example.com",
           "BUYER_PRIVKEY": "..."
         }
       },
-      "nanorelay-seller": {
+      "nanobazar-relay-seller": {
         "enabled": true,
         "env": {
           "RELAY_URL": "https://relay.example.com",

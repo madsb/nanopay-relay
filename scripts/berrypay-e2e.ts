@@ -5,7 +5,7 @@ import { fetch } from 'undici';
 import {
   publicKeyFromPrivateKeyHex,
   signCanonical
-} from '@nanopay/shared';
+} from '@nanobazaar/shared';
 
 const relayUrl = process.env.RELAY_URL ?? 'http://localhost:3000';
 const offerTag = process.env.OFFER_TAG ?? 'web_extract';
@@ -116,7 +116,7 @@ const runPayInvoice = async (jobId: string) => {
   const args = [
     'exec',
     'tsx',
-    'skills/nanorelay-buyer/scripts/pay-invoice.mjs',
+    'skills/nanobazar-relay-buyer/scripts/pay-invoice.mjs',
     '--job-id',
     jobId
   ];

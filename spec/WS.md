@@ -1,4 +1,4 @@
-# NanoPay Relay v0 WebSocket
+# NanoBazaar Relay v0 WebSocket
 
 ## Endpoint
 - `WS /ws/seller`

@@ -1,6 +1,6 @@
 import nacl from 'tweetnacl';
 import { randomBytes } from 'node:crypto';
-import { bytesToHex, signCanonical } from '@nanopay/shared';
+import { bytesToHex, signCanonical } from '@nanobazaar/shared';
 import type { FastifyInstance } from 'fastify';
 
 export type KeypairHex = {

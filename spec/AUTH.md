@@ -1,4 +1,4 @@
-# NanoPay Relay v0 Authentication
+# NanoBazaar Relay v0 Authentication
 
 ## REST Authentication Headers
 All mutating requests must include these headers:

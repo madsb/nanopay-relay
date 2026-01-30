@@ -1,5 +1,5 @@
 {
-  "name": "@nanopay/relay-client",
+  "name": "@nanobazaar/relay-client",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -8,7 +8,7 @@
     ".": "./src/index.ts"
   },
   "dependencies": {
-    "@nanopay/shared": "workspace:*",
+    "@nanobazaar/shared": "workspace:*",
     "undici": "^6.17.0"
   }
 }

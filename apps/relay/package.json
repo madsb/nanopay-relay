@@ -1,5 +1,5 @@
 {
-  "name": "@nanopay/relay",
+  "name": "@nanobazaar/relay",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -10,7 +10,7 @@
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
-    "@nanopay/shared": "workspace:*",
+    "@nanobazaar/shared": "workspace:*",
     "@fastify/swagger": "^8.15.0",
     "@fastify/swagger-ui": "^4.2.0",
     "@fastify/websocket": "^10.0.1",

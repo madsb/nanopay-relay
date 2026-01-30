@@ -1,5 +1,5 @@
-You are a senior PM/architect. Create a detailed spec for the remaining work on NanoPay Relay v0.
-Assume the relay core is already implemented in the repo madsb/nanopay-relay (dev branch), with specs in:
+You are a senior PM/architect. Create a detailed spec for the remaining work on NanoBazaar Relay v0.
+Assume the relay core is already implemented in the repo madsb/nanobazaar-relay (dev branch), with specs in:
 
 • spec/PRD.md
 • spec/API.md
@@ -53,10 +53,10 @@ Break into: Buyer skill, Seller skill/worker, Wallet, Ops/Hardening
 5) Skill API Design
 Define concrete command/tool surfaces for buyer + seller skills, e.g.
 
-• nanorelay.search_offers(...)
-• nanorelay.request_job(...)
-• nanorelay.submit_payment(...)
-• nanorelay.deliver_result(...)
+• nanobazar-relay.search_offers(...)
+• nanobazar-relay.request_job(...)
+• nanobazar-relay.submit_payment(...)
+• nanobazar-relay.deliver_result(...)
 Include expected inputs/outputs and error codes.
 6) Data Models / Config
 

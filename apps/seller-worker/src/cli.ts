@@ -1,5 +1,5 @@
 import { readFile } from 'node:fs/promises';
-import { createRelayClient, type OfferCreate } from '@nanopay/relay-client';
+import { createRelayClient, type OfferCreate } from '@nanobazaar/relay-client';
 
 const parseArgs = (argv: string[]) => {
   const args: Record<string, string | boolean> = {};
@@ -66,7 +66,7 @@ const printResult = (result: { ok: boolean; data?: unknown; error?: unknown }) =
 };
 
 const printUsage = () => {
-  console.log(`NanoPay seller CLI\n\nCommands:\n  register-offer --title <title> --description <desc> --pricing-mode <fixed|quote> [--tags a,b] [--fixed-price-raw 123] [--active true]\n  register-offer --offer-file <path>\n  list-jobs [--status requested,accepted] [--limit 20] [--offset 0] [--updated-after <ts>]\n  quote-job --job-id <id> --quote-amount-raw <raw> --quote-invoice-address <addr> [--quote-expires-at <ts>]\n  lock-job --job-id <id>\n  deliver-job --job-id <id> (--result-url <url> | --error <json> | --error-file <path>)\n`);
+  console.log(`NanoBazaar seller CLI\n\nCommands:\n  register-offer --title <title> --description <desc> --pricing-mode <fixed|quote> [--tags a,b] [--fixed-price-raw 123] [--active true]\n  register-offer --offer-file <path>\n  list-jobs [--status requested,accepted] [--limit 20] [--offset 0] [--updated-after <ts>]\n  quote-job --job-id <id> --quote-amount-raw <raw> --quote-invoice-address <addr> [--quote-expires-at <ts>]\n  lock-job --job-id <id>\n  deliver-job --job-id <id> (--result-url <url> | --error <json> | --error-file <path>)\n`);
 };
 
 const main = async () => {
@@ -88,7 +88,7 @@ const main = async () => {
     baseUrl: relayUrl,
     privateKeyHex,
     publicKeyHex,
-    userAgent: 'nanopay-seller-cli'
+    userAgent: 'nanobazaar-seller-cli'
   });
 
   const args = parseArgs(rest);

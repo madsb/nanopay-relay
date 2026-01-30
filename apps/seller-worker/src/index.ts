@@ -6,7 +6,7 @@ import {
   publicKeyFromPrivateKeyHex,
   signCanonical,
   signNonce
-} from '@nanopay/shared';
+} from '@nanobazaar/shared';
 import type { Job } from './types.js';
 import {
   createCharge,
@@ -18,7 +18,7 @@ import {
   readChargeMap,
   setChargeMapping,
   startChargeListener
-} from '../../../skills/nanorelay-common/berrypay.mjs';
+} from '../../../skills/nanobazar-relay-seller/scripts/berrypay.mjs';
 
 const relayUrl = process.env.RELAY_URL ?? 'http://localhost:3000';
 const sellerPrivkey = process.env.SELLER_PRIVKEY;

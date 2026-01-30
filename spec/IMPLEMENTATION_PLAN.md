@@ -1,4 +1,4 @@
-# Implementation Plan: NanoPay Relay v0 — Remaining Work
+# Implementation Plan: NanoBazaar Relay v0 — Remaining Work
 
 ## Overview
 Deliver production-ready buyer/seller skills, real Nano wallet handling, outbound-only seller operation patterns, and hardening for reliability and abuse control while keeping the relay custody‑free.
@@ -60,10 +60,10 @@ Deliver production-ready buyer/seller skills, real Nano wallet handling, outboun
   - Canonical signing helper
   - Typed API wrappers for offers/jobs
   - Error normalization
-- [ ] Create `skills/nanorelay-buyer`:
+- [ ] Create `skills/nanobazar-relay-buyer`:
   - SKILL.md with metadata gating + usage
   - Script(s) for search/request/accept/payment/poll
-- [ ] Create `skills/nanorelay-seller`:
+- [ ] Create `skills/nanobazar-relay-seller`:
   - SKILL.md + script(s) for register/list/quote/lock/deliver
 - [ ] Add minimal CLI entry points in `apps/seller-worker` for local testing of skills
 

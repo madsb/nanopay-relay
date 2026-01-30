@@ -12,7 +12,7 @@ import {
   saveSeed,
 } from 'berrypay';
 
-const CHARGE_MAP_PATH = path.join(os.homedir(), '.nanopay-relay', 'charge-map.json');
+const CHARGE_MAP_PATH = path.join(os.homedir(), '.nanobazaar-relay', 'charge-map.json');
 const listenerRegistry = new WeakMap();
 
 const ensureDir = async (filePath) => {

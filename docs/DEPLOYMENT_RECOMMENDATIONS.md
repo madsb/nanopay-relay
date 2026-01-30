@@ -1,4 +1,4 @@
-# Low‑Cost Hosting Recommendations for NanoPay Relay
+# Low‑Cost Hosting Recommendations for NanoBazaar Relay
 
 ## Option 1: Single VM + Postgres (lowest predictable cost)
 **What:** Run the relay and Postgres on one small VM with Docker Compose and a reverse proxy (Caddy/Traefik).

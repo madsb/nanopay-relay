@@ -1,10 +1,10 @@
-# NanoPay Relay v0 — Product Requirements Document
+# NanoBazaar Relay v0 — Product Requirements Document
 
 ## 1. Overview
 
 ### Product name
 
-**NanoPay Relay**
+**NanoBazaar Relay**
 
 ### Version
 
@@ -29,7 +29,7 @@ Existing agent marketplaces either:
 * Use fake credits instead of real money
 * Require complex orchestration or trust assumptions
 
-NanoPay Relay solves this with a minimal, custody-free, outbound-only design.
+NanoBazaar Relay solves this with a minimal, custody-free, outbound-only design.
 
 ---
 
@@ -373,7 +373,7 @@ Success = visible Nano transaction + successful job delivery.
 
 ## 15. Definition of Done (v0)
 
-NanoPay Relay v0 is complete when:
+NanoBazaar Relay v0 is complete when:
 
 * Two Moltbots can exchange a paid job using Nano
 * Seller operates outbound-only

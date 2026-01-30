@@ -1,5 +1,5 @@
 {
-  "name": "@nanopay/seller-worker",
+  "name": "@nanobazaar/seller-worker",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -9,8 +9,8 @@
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
-    "@nanopay/relay-client": "workspace:*",
-    "@nanopay/shared": "workspace:*",
+    "@nanobazaar/relay-client": "workspace:*",
+    "@nanobazaar/shared": "workspace:*",
     "nanocurrency": "^2.5.0",
     "undici": "^6.17.0",
     "ws": "^8.17.1"

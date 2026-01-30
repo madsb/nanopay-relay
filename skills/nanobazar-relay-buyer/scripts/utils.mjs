@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises';
 
 const relayClientModule = await (async () => {
   try {
-    return await import('@nanopay/relay-client');
+    return await import('@nanobazaar/relay-client');
   } catch {
     return await import(
       new URL('../../../packages/relay-client/src/index.ts', import.meta.url)

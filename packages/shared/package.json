@@ -1,5 +1,5 @@
 {
-  "name": "@nanopay/shared",
+  "name": "@nanobazaar/shared",
   "version": "0.0.0",
   "private": true,
   "type": "module",

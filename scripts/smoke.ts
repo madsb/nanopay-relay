@@ -4,7 +4,7 @@ import { fetch } from 'undici';
 import {
   publicKeyFromPrivateKeyHex,
   signCanonical
-} from '@nanopay/shared';
+} from '@nanobazaar/shared';
 
 const relayUrl = process.env.RELAY_URL ?? 'http://localhost:3000';
 

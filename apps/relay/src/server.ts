@@ -5,7 +5,7 @@ import websocket from '@fastify/websocket';
 import { randomBytes } from 'node:crypto';
 import { sql } from 'kysely';
 import { z } from 'zod';
-import { sha256Hex, verifyCanonical, verifyNonce } from '@nanopay/shared';
+import { sha256Hex, verifyCanonical, verifyNonce } from '@nanobazaar/shared';
 import { createDb, type JobStatus } from './db.js';
 import './types.js';
 
@@ -281,7 +281,7 @@ export const buildServer = async (databaseUrl?: string) => {
   const db = createDb(
     databaseUrl ??
       process.env.DATABASE_URL ??
-      'postgres://postgres:postgres@localhost:5432/nanopay_relay?sslmode=disable'
+      'postgres://postgres:postgres@localhost:5432/nanobazaar_relay?sslmode=disable'
   );
   server.decorate('db', db);
   server.addHook('onClose', async () => {
@@ -334,7 +334,7 @@ export const buildServer = async (databaseUrl?: string) => {
   await server.register(swagger, {
     openapi: {
       info: {
-        title: 'NanoPay Relay',
+        title: 'NanoBazaar Relay',
         version: '0.0.0'
       }
     }

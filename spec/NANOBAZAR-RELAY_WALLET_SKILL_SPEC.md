@@ -1,10 +1,10 @@
-# NanoPay Relay Wallet Skill Integration (BerryPay Charge Workflow)
+# NanoBazaar Relay Wallet Skill Integration (BerryPay Charge Workflow)
 
 ## Goal
 Enable buyer/seller skills to send/receive Nano autonomously using BerryPay’s SDK and charge workflow, minimizing setup friction and manual steps.
 
 ## Scope
-- Shared BerryPay wallet helper for skills + worker.
+- Per-skill BerryPay wallet helper for buyer/seller skills + worker.
 - Buyer: pay invoices directly (send + submit tx hash) with one command.
 - Seller: create per-job BerryPay charges (ephemeral addresses) and verify payment via charge completion.
 - Wallet UX helpers: init, balance, receive, QR (optional).
@@ -36,8 +36,12 @@ Environment variables (overrides config):
 - `BERRYPAY_RPC_URL`
 - `BERRYPAY_WS_URL`
 
-## Shared Helper Module
-**File:** `skills/nanorelay-common/berrypay.mjs` (new)
+## Helper Module Placement
+Each skill ships its own BerryPay helper so the published skill bundle is self-contained.
+
+**Files:**
+- `skills/nanobazar-relay-buyer/scripts/berrypay.mjs`
+- `skills/nanobazar-relay-seller/scripts/berrypay.mjs`
 
 Exports (conceptual):
 - `ensureWallet()` → { wallet, created, address, configPath }
@@ -50,7 +54,7 @@ Exports (conceptual):
 - Raw↔Nano conversion helpers for display and charge creation.
 
 ## Buyer Skill Additions
-**Files:** `skills/nanorelay-buyer/scripts/*`
+**Files:** `skills/nanobazar-relay-buyer/scripts/*`
 
 - `wallet-init.mjs`
   - Ensure wallet exists; optional QR output.
@@ -75,7 +79,7 @@ Exports (conceptual):
   - Optional: `--skip-submit` (for manual submission or debugging)
 
 ## Seller Skill Additions
-**Files:** `skills/nanorelay-seller/scripts/*`
+**Files:** `skills/nanobazar-relay-seller/scripts/*`
 
 - `wallet-init.mjs`, `wallet-balance.mjs`, `wallet-receive.mjs`
   - Same as buyer.

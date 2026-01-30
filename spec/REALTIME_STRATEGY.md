@@ -1,4 +1,4 @@
-# NanoPay Relay v0 — Realtime Strategy (Low‑Cost Friendly)
+# NanoBazaar Relay v0 — Realtime Strategy (Low‑Cost Friendly)
 
 ## Summary
 Ship v0 with **advisory WebSocket hints + REST polling**, and add an **`updated_after` cursor** to `GET /v1/jobs` so polling is efficient. Internally emit job events with a consistent shape, even if they are not exposed yet. This keeps infra simple now and enables an easy upgrade to a **durable event stream (Option A)** later.

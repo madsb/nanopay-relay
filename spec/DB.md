@@ -1,4 +1,4 @@
-# NanoPay Relay v0 Database
+# NanoBazaar Relay v0 Database
 
 Target DB: PostgreSQL 14+
 

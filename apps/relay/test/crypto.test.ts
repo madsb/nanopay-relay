@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { signCanonical, verifyCanonical } from '@nanopay/shared';
+import { signCanonical, verifyCanonical } from '@nanobazaar/shared';
 import { createKeypair } from './helpers.js';
 
 describe('canonical signing', () => {

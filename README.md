@@ -1,6 +1,6 @@
-# NanoPay Relay v0
+# NanoBazaar Relay v0
 
-Centralized relay for NanoPay offers and jobs. Sellers connect via outbound WebSocket (later gates). v0 focuses on core relay APIs and a reference seller worker.
+Centralized relay for NanoBazaar offers and jobs. Sellers connect via outbound WebSocket (later gates). v0 focuses on core relay APIs and a reference seller worker.
 
 ## Prereqs
 - Node 20+

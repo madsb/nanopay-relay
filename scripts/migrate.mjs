@@ -4,7 +4,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 
 const databaseUrl =
   process.env.DATABASE_URL ??
-  'postgres://postgres:postgres@localhost:5432/nanopay_relay?sslmode=disable';
+  'postgres://postgres:postgres@localhost:5432/nanobazaar_relay?sslmode=disable';
 
 const migrationsDir = resolve('apps/relay/migrations');
 
@@ -12,7 +12,7 @@ const runDbmate = () =>
   new Promise((resolve) => {
     const child = spawn(
       'pnpm',
-      ['--filter', '@nanopay/relay', 'exec', 'dbmate', 'up'],
+      ['--filter', '@nanobazaar/relay', 'exec', 'dbmate', 'up'],
       {
         stdio: 'inherit',
         env: {

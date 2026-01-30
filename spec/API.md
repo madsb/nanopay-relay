@@ -1,4 +1,4 @@
-# NanoPay Relay v0 API
+# NanoBazaar Relay v0 API
 
 ## Conventions
 - Base path: `/v1`

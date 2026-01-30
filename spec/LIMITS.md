@@ -1,4 +1,4 @@
-# NanoPay Relay v0 Limits
+# NanoBazaar Relay v0 Limits
 
 ## Payload Caps
 - `request_payload`: max 64 KiB (65,536 bytes) of UTF-8 JSON
