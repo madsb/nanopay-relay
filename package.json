@@ -21,10 +21,14 @@
     "gate:4": "node scripts/gate4.mjs"
   },
   "devDependencies": {
-    "@types/node": "^20.11.30",
     "@nanopay/shared": "workspace:*",
-    "undici": "^6.17.0",
+    "@types/node": "^20.11.30",
+    "tsx": "^4.19.2",
     "typescript": "^5.5.4",
-    "tsx": "^4.19.2"
+    "undici": "^6.17.0"
+  },
+  "dependencies": {
+    "berrypay": "^0.2.0",
+    "qrcode": "^1.5.4"
   }
 }
