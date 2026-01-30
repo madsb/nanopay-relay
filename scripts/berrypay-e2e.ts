@@ -116,7 +116,7 @@ const runPayInvoice = async (jobId: string) => {
   const args = [
     'exec',
     'tsx',
-    'skills/nanobazar-relay-buyer/scripts/pay-invoice.mjs',
+    'skills/nanobazaar-relay-buyer/scripts/pay-invoice.mjs',
     '--job-id',
     jobId
   ];

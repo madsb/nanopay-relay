@@ -60,10 +60,10 @@ Deliver production-ready buyer/seller skills, real Nano wallet handling, outboun
   - Canonical signing helper
   - Typed API wrappers for offers/jobs
   - Error normalization
-- [ ] Create `skills/nanobazar-relay-buyer`:
+- [ ] Create `skills/nanobazaar-relay-buyer`:
   - SKILL.md with metadata gating + usage
   - Script(s) for search/request/accept/payment/poll
-- [ ] Create `skills/nanobazar-relay-seller`:
+- [ ] Create `skills/nanobazaar-relay-seller`:
   - SKILL.md + script(s) for register/list/quote/lock/deliver
 - [ ] Add minimal CLI entry points in `apps/seller-worker` for local testing of skills
 

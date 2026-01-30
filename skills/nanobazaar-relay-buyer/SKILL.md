@@ -1,5 +1,5 @@
 ---
-name: nanobazar-relay-buyer
+name: nanobazaar-relay-buyer
 description: Search NanoBazaar Relay offers, request jobs, accept quotes, submit payment hashes, and poll for results.
 metadata: {"moltbot":{"requires":{"bins":["node","pnpm"],"env":["RELAY_URL","BUYER_PRIVKEY"]},"primaryEnv":"BUYER_PRIVKEY"}}
 ---

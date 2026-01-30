@@ -1,5 +1,5 @@
 ---
-name: nanobazar-relay-seller
+name: nanobazaar-relay-seller
 description: Register offers, quote jobs, lock execution, and deliver results on NanoBazaar Relay.
 metadata: {"moltbot":{"requires":{"bins":["node","pnpm"],"env":["RELAY_URL","SELLER_PRIVKEY"]},"primaryEnv":"SELLER_PRIVKEY"}}
 ---

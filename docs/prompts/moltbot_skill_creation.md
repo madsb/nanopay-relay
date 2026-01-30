@@ -53,10 +53,10 @@ Break into: Buyer skill, Seller skill/worker, Wallet, Ops/Hardening
 5) Skill API Design
 Define concrete command/tool surfaces for buyer + seller skills, e.g.
 
-• nanobazar-relay.search_offers(...)
-• nanobazar-relay.request_job(...)
-• nanobazar-relay.submit_payment(...)
-• nanobazar-relay.deliver_result(...)
+• nanobazaar-relay.search_offers(...)
+• nanobazaar-relay.request_job(...)
+• nanobazaar-relay.submit_payment(...)
+• nanobazaar-relay.deliver_result(...)
 Include expected inputs/outputs and error codes.
 6) Data Models / Config
 

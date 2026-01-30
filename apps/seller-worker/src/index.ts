@@ -16,7 +16,7 @@ import {
   readChargeMap,
   setChargeMapping,
   startChargeListener
-} from '../../../skills/nanobazar-relay-seller/scripts/berrypay.mjs';
+} from '../../../skills/nanobazaar-relay-seller/scripts/berrypay.mjs';
 
 const relayUrl = process.env.RELAY_URL ?? 'http://localhost:3000';
 const sellerPrivkey = process.env.SELLER_PRIVKEY;

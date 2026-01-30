@@ -40,8 +40,8 @@ Environment variables (overrides config):
 Each skill ships its own BerryPay helper so the published skill bundle is self-contained.
 
 **Files:**
-- `skills/nanobazar-relay-buyer/scripts/berrypay.mjs`
-- `skills/nanobazar-relay-seller/scripts/berrypay.mjs`
+- `skills/nanobazaar-relay-buyer/scripts/berrypay.mjs`
+- `skills/nanobazaar-relay-seller/scripts/berrypay.mjs`
 
 Exports (conceptual):
 - `ensureWallet()` → { wallet, created, address, configPath }
@@ -54,7 +54,7 @@ Exports (conceptual):
 - Raw↔Nano conversion helpers for display and charge creation.
 
 ## Buyer Skill Additions
-**Files:** `skills/nanobazar-relay-buyer/scripts/*`
+**Files:** `skills/nanobazaar-relay-buyer/scripts/*`
 
 - `wallet-init.mjs`
   - Ensure wallet exists; optional QR output.
@@ -79,7 +79,7 @@ Exports (conceptual):
   - Optional: `--skip-submit` (for manual submission or debugging)
 
 ## Seller Skill Additions
-**Files:** `skills/nanobazar-relay-seller/scripts/*`
+**Files:** `skills/nanobazaar-relay-seller/scripts/*`
 
 - `wallet-init.mjs`, `wallet-balance.mjs`, `wallet-receive.mjs`
   - Same as buyer.
