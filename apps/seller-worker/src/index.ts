@@ -7,30 +7,27 @@ import {
   signCanonical,
   signNonce
 } from '@nanopay/shared';
-import { NanoRpcClient } from './nano-rpc.js';
-import { PaymentVerifier } from './payment-verifier.js';
 import type { Job } from './types.js';
-import { NanoWallet } from './wallet.js';
+import {
+  createCharge,
+  createPaymentProcessor,
+  ensureWallet,
+  getChargeMapping,
+  getChargeStatus,
+  rawToNano,
+  readChargeMap,
+  setChargeMapping,
+  startChargeListener
+} from '../../../skills/nanorelay-common/berrypay.mjs';
 
 const relayUrl = process.env.RELAY_URL ?? 'http://localhost:3000';
 const sellerPrivkey = process.env.SELLER_PRIVKEY;
-const nanoSeed = process.env.NANO_SEED;
-const nanoRpcUrl = process.env.NANO_RPC_URL;
-const walletStatePath = process.env.NANO_WALLET_STATE_PATH ?? './data/wallet-state.json';
 
 const parseEnvInt = (value: string | undefined, fallback: number) => {
   const parsed = Number.parseInt(value ?? '', 10);
   return Number.isFinite(parsed) ? parsed : fallback;
 };
 
-const nanoAccountIndexStart = parseEnvInt(
-  process.env.NANO_ACCOUNT_INDEX_START,
-  0
-);
-const nanoMinConfirmations = parseEnvInt(
-  process.env.NANO_MIN_CONFIRMATIONS,
-  1
-);
 const pollIntervalMs = parseEnvInt(process.env.POLL_INTERVAL_MS, 2000);
 const pollJitterMs = parseEnvInt(process.env.POLL_JITTER_MS, 250);
 const lockRenewIntervalMs = parseEnvInt(
@@ -40,17 +37,15 @@ const lockRenewIntervalMs = parseEnvInt(
 const wsBackoffBaseMs = parseEnvInt(process.env.WS_BACKOFF_BASE_MS, 500);
 const wsBackoffMaxMs = parseEnvInt(process.env.WS_BACKOFF_MAX_MS, 30000);
 const jobPageSize = 50;
+const quoteAmountRaw = process.env.QUOTE_AMOUNT_RAW ?? '1000';
+const quoteExpiresMs = parseEnvInt(process.env.QUOTE_EXPIRES_MS, 10 * 60 * 1000);
+const chargeTimeoutMs = parseEnvInt(
+  process.env.CHARGE_TIMEOUT_MS,
+  quoteExpiresMs
+);
 
 if (!sellerPrivkey) {
   console.error('SELLER_PRIVKEY is required');
-  process.exit(1);
-}
-if (!nanoSeed) {
-  console.error('NANO_SEED is required');
-  process.exit(1);
-}
-if (!nanoRpcUrl) {
-  console.error('NANO_RPC_URL is required');
   process.exit(1);
 }
 
@@ -58,21 +53,16 @@ const sellerPubkey = publicKeyFromPrivateKeyHex(sellerPrivkey);
 
 const wsUrl = relayUrl.replace(/^http/i, 'ws') + '/ws/seller';
 
-let wallet: NanoWallet | null = null;
-let paymentVerifier: PaymentVerifier | null = null;
+let processor: ReturnType<typeof createPaymentProcessor> | null = null;
+const jobToChargeId = new Map<string, string>();
+const chargeIdToJobId = new Map<string, string>();
+const paidJobs = new Set<string>();
 
-const getWallet = () => {
-  if (!wallet) {
-    throw new Error('Wallet not initialized');
+const getProcessor = () => {
+  if (!processor) {
+    throw new Error('Payment processor not initialized');
   }
-  return wallet;
-};
-
-const getPaymentVerifier = () => {
-  if (!paymentVerifier) {
-    throw new Error('Payment verifier not initialized');
-  }
-  return paymentVerifier;
+  return processor;
 };
 
 const buildAuthHeaders = (method: string, path: string, body: Buffer) => {
@@ -171,14 +161,95 @@ const listJobs = async (options: {
   return apiRequest<JobListResponse>('GET', path);
 };
 
+const loadChargeMappings = async () => {
+  const map = await readChargeMap();
+  for (const [jobId, chargeId] of Object.entries(map)) {
+    if (!chargeId) continue;
+    const chargeIdStr = String(chargeId);
+    jobToChargeId.set(jobId, chargeIdStr);
+    chargeIdToJobId.set(chargeIdStr, jobId);
+  }
+};
+
+const recordChargeMapping = async (jobId: string, chargeId: string) => {
+  jobToChargeId.set(jobId, chargeId);
+  chargeIdToJobId.set(chargeId, jobId);
+  await setChargeMapping(jobId, chargeId);
+};
+
+const resolveChargeId = async (job: Job): Promise<string | null> => {
+  let chargeId = jobToChargeId.get(job.job_id);
+  if (!chargeId) {
+    const stored = await getChargeMapping(job.job_id);
+    if (stored) {
+      chargeId = String(stored);
+      jobToChargeId.set(job.job_id, chargeId);
+      chargeIdToJobId.set(chargeId, job.job_id);
+    }
+  }
+  if (!chargeId && job.quote_invoice_address) {
+    const charge = getProcessor().getChargeByAddress(job.quote_invoice_address);
+    if (charge) {
+      chargeId = charge.id;
+      await recordChargeMapping(job.job_id, chargeId);
+    }
+  }
+  return chargeId ?? null;
+};
+
+const createChargeForJob = async (jobId: string, amountRaw: string) => {
+  const existingId = jobToChargeId.get(jobId);
+  if (existingId) {
+    const existing = getProcessor().getCharge(existingId);
+    if (existing) {
+      return {
+        chargeId: existing.id,
+        address: existing.address,
+        amount_nano: existing.amountNano,
+        amount_raw: existing.amountRaw
+      };
+    }
+  }
+  const charge = await createCharge(getProcessor(), {
+    amountNano: rawToNano(amountRaw),
+    metadata: { job_id: jobId },
+    timeoutMs: chargeTimeoutMs
+  });
+  await recordChargeMapping(jobId, charge.chargeId);
+  return charge;
+};
+
 const createQuote = async (jobId: string) => {
-  const invoice = await getWallet().getOrCreateInvoice(jobId);
+  const charge = await createChargeForJob(jobId, quoteAmountRaw);
   const payload = {
-    quote_amount_raw: '1000',
-    quote_invoice_address: invoice.address,
-    quote_expires_at: new Date(Date.now() + 10 * 60 * 1000).toISOString()
+    quote_amount_raw: charge.amount_raw ?? quoteAmountRaw,
+    quote_invoice_address: charge.address,
+    quote_expires_at: new Date(Date.now() + quoteExpiresMs).toISOString()
   };
   return apiRequest('POST', `/v1/jobs/${jobId}/quote`, payload);
+};
+
+const reconcileChargeStatuses = async () => {
+  for (const [jobId, chargeId] of jobToChargeId.entries()) {
+    try {
+      const status = await getChargeStatus(getProcessor(), chargeId);
+      if (status.is_paid) {
+        paidJobs.add(jobId);
+      }
+    } catch (error) {
+      console.warn('Charge reconcile failed', jobId, chargeId, error);
+    }
+  }
+};
+
+const handleChargeCompleted = (charge: { id: string }) => {
+  const jobId = chargeIdToJobId.get(charge.id);
+  if (jobId) {
+    paidJobs.add(jobId);
+    console.log('Charge completed', charge.id, jobId);
+  } else {
+    console.log('Charge completed', charge.id);
+  }
 };
 
 const lockJob = async (jobId: string) =>
@@ -193,23 +264,27 @@ const deliverJob = async (jobId: string, delivery: DeliveryPayload) =>
   apiRequest<{ job: Job }>('POST', `/v1/jobs/${jobId}/deliver`, delivery);
 
 const verifyPayment = async (job: Job) => {
-  const verifier = getPaymentVerifier();
-  const result = await verifier.verify(job);
-  if (!result.verified) {
-    if (
-      result.reason !== 'payment.not_found' &&
-      result.reason !== 'payment.unconfirmed'
-    ) {
-      console.warn(
-        'Payment verification failed',
-        job.job_id,
-        result.reason,
-        result.details
-      );
-    }
+  if (!job.quote_invoice_address || !job.quote_amount_raw) {
     return false;
   }
-  return true;
+  if (paidJobs.has(job.job_id)) {
+    return true;
+  }
+  const chargeId = await resolveChargeId(job);
+  if (!chargeId) {
+    return false;
+  }
+  try {
+    const status = await getChargeStatus(getProcessor(), chargeId);
+    if (status.is_paid) {
+      paidJobs.add(job.job_id);
+      return true;
+    }
+    return false;
+  } catch (error) {
+    console.warn('Charge status failed', job.job_id, chargeId, error);
+    return false;
+  }
 };
 
 const executeJob = (payload: unknown) => {
@@ -260,6 +335,7 @@ const clearJobState = (jobId: string) => {
   inFlightJobs.delete(jobId);
   pendingDeliveries.delete(jobId);
   lockLostJobs.delete(jobId);
+  paidJobs.delete(jobId);
   stopLockHeartbeat(jobId);
 };
 
@@ -628,22 +704,20 @@ const registerOfferWithRetry = async () => {
 
 const main = async () => {
   try {
-    wallet = await NanoWallet.init({
-      seed: nanoSeed,
-      statePath: walletStatePath,
-      indexStart: nanoAccountIndexStart
+    const { wallet } = ensureWallet();
+    processor = createPaymentProcessor({
+      wallet,
+      autoSweep: true
+    });
+    await loadChargeMappings();
+    await reconcileChargeStatuses();
+    await startChargeListener(getProcessor(), {
+      completed: handleChargeCompleted
     });
   } catch (error) {
-    console.error('Failed to initialize Nano wallet state', error);
+    console.error('Failed to initialize BerryPay processor', error);
     process.exit(1);
   }
-
-  const rpcClient = new NanoRpcClient(nanoRpcUrl);
-  paymentVerifier = new PaymentVerifier({
-    wallet: getWallet(),
-    rpc: rpcClient,
-    minConfirmations: nanoMinConfirmations
-  });
   void registerOfferWithRetry();
 
   connectWebSocket();
