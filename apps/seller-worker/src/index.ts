@@ -31,6 +31,15 @@ const nanoMinConfirmations = parseEnvInt(
   process.env.NANO_MIN_CONFIRMATIONS,
   1
 );
+const pollIntervalMs = parseEnvInt(process.env.POLL_INTERVAL_MS, 2000);
+const pollJitterMs = parseEnvInt(process.env.POLL_JITTER_MS, 250);
+const lockRenewIntervalMs = parseEnvInt(
+  process.env.LOCK_RENEW_INTERVAL_MS,
+  120000
+);
+const wsBackoffBaseMs = parseEnvInt(process.env.WS_BACKOFF_BASE_MS, 500);
+const wsBackoffMaxMs = parseEnvInt(process.env.WS_BACKOFF_MAX_MS, 30000);
+const jobPageSize = 50;
 
 if (!sellerPrivkey) {
   console.error('SELLER_PRIVKEY is required');
@@ -136,18 +145,30 @@ const registerOffer = async () => {
   return response.data?.offer.offer_id ?? null;
 };
 
-const listJobs = async (updatedAfter: string | null) => {
+type JobListResponse = {
+  jobs: Job[];
+  limit: number;
+  offset: number;
+  total: number;
+};
+
+const listJobs = async (options: {
+  updatedAfter?: string | null;
+  statuses?: string;
+  limit?: number;
+  offset?: number;
+}) => {
   const params = new URLSearchParams({
     role: 'seller',
-    status: 'requested,accepted',
-    limit: '50',
-    offset: '0'
+    status: options.statuses ?? 'requested,accepted,running',
+    limit: String(options.limit ?? jobPageSize),
+    offset: String(options.offset ?? 0)
   });
-  if (updatedAfter) {
-    params.set('updated_after', updatedAfter);
+  if (options.updatedAfter) {
+    params.set('updated_after', options.updatedAfter);
   }
   const path = `/v1/jobs?${params.toString()}`;
-  return apiRequest<{ jobs: Job[] }>('GET', path);
+  return apiRequest<JobListResponse>('GET', path);
 };
 
 const createQuote = async (jobId: string) => {
@@ -161,20 +182,30 @@ const createQuote = async (jobId: string) => {
 };
 
 const lockJob = async (jobId: string) =>
-  apiRequest('POST', `/v1/jobs/${jobId}/lock`, {});
+  apiRequest<{ job: Job }>('POST', `/v1/jobs/${jobId}/lock`, {});
 
-const deliverJob = async (jobId: string, result: Record<string, unknown>) =>
-  apiRequest('POST', `/v1/jobs/${jobId}/deliver`, {
-    result_payload: result,
-    error: null
-  });
+type DeliveryPayload = {
+  result_payload: unknown | null;
+  error: unknown | null;
+};
+
+const deliverJob = async (jobId: string, delivery: DeliveryPayload) =>
+  apiRequest<{ job: Job }>('POST', `/v1/jobs/${jobId}/deliver`, delivery);
 
 const verifyPayment = async (job: Job) => {
   const verifier = getPaymentVerifier();
   const result = await verifier.verify(job);
   if (!result.verified) {
-    if (result.reason !== 'payment.not_found' && result.reason !== 'payment.unconfirmed') {
-      console.warn('Payment verification failed', job.job_id, result.reason, result.details);
+    if (
+      result.reason !== 'payment.not_found' &&
+      result.reason !== 'payment.unconfirmed'
+    ) {
+      console.warn(
+        'Payment verification failed',
+        job.job_id,
+        result.reason,
+        result.details
+      );
     }
     return false;
   }
@@ -194,62 +225,290 @@ const executeJob = (payload: unknown) => {
   };
 };
 
-const quotedJobs = new Set<string>();
-const deliveredJobs = new Set<string>();
+const trackedJobs = new Map<string, Job>();
+const inFlightJobs = new Set<string>();
+const pendingDeliveries = new Map<string, DeliveryPayload>();
+const lockHeartbeats = new Map<string, NodeJS.Timeout>();
+const lockLostJobs = new Set<string>();
 let polling = false;
 let lastUpdatedAt: string | null = null;
+let initialSyncDone = false;
+let wsReconnectAttempts = 0;
+
+const isTrackedStatus = (status: string) =>
+  status === 'requested' || status === 'accepted' || status === 'running';
+
+const maxTimestamp = (current: string | null, candidate: string | null) => {
+  if (!candidate) return current;
+  if (!current) return candidate;
+  const currentTime = new Date(current).getTime();
+  const candidateTime = new Date(candidate).getTime();
+  if (!Number.isFinite(candidateTime)) return current;
+  if (!Number.isFinite(currentTime)) return candidate;
+  return candidateTime > currentTime ? candidate : current;
+};
+
+const stopLockHeartbeat = (jobId: string) => {
+  const timer = lockHeartbeats.get(jobId);
+  if (!timer) return;
+  clearInterval(timer);
+  lockHeartbeats.delete(jobId);
+};
+
+const clearJobState = (jobId: string) => {
+  trackedJobs.delete(jobId);
+  inFlightJobs.delete(jobId);
+  pendingDeliveries.delete(jobId);
+  lockLostJobs.delete(jobId);
+  stopLockHeartbeat(jobId);
+};
+
+const updateTrackedJob = (job: Job) => {
+  if (isTrackedStatus(job.status)) {
+    trackedJobs.set(job.job_id, job);
+  } else {
+    clearJobState(job.job_id);
+  }
+};
+
+const renewLock = async (jobId: string) => {
+  const response = await lockJob(jobId);
+  if (response.status === 200) {
+    if (response.data?.job) {
+      updateTrackedJob(response.data.job);
+    }
+    return true;
+  }
+  if (response.status === 409) {
+    console.warn('Lock lost', jobId);
+    lockLostJobs.add(jobId);
+    stopLockHeartbeat(jobId);
+    return false;
+  }
+  console.warn('Lock renewal failed', jobId, response.status, response.data);
+  return false;
+};
+
+const startLockHeartbeat = (jobId: string) => {
+  if (lockHeartbeats.has(jobId)) return;
+  lockLostJobs.delete(jobId);
+  const timer = setInterval(() => {
+    void renewLock(jobId);
+  }, lockRenewIntervalMs);
+  lockHeartbeats.set(jobId, timer);
+};
+
+const cursorSkewMs = parseEnvInt(process.env.POLL_CURSOR_SKEW_MS, 200);
+
+const getCursorTimestamp = () => {
+  if (!lastUpdatedAt) return null;
+  const parsed = new Date(lastUpdatedAt).getTime();
+  if (!Number.isFinite(parsed)) return lastUpdatedAt;
+  const skewed = Math.max(0, parsed - cursorSkewMs);
+  return new Date(skewed).toISOString();
+};
+
+const syncTrackedJobs = async () => {
+  const cursor = '1970-01-01T00:00:00.000Z';
+  let offset = 0;
+  let maxUpdated: string | null = lastUpdatedAt;
+  while (true) {
+    const response = await listJobs({
+      updatedAfter: cursor,
+      offset,
+      limit: jobPageSize
+    });
+    if (response.status !== 200 || !response.data) {
+      console.error('Failed to sync jobs', response.status, response.data);
+      return false;
+    }
+    for (const job of response.data.jobs) {
+      updateTrackedJob(job);
+      maxUpdated = maxTimestamp(maxUpdated, job.updated_at);
+    }
+    const pageSize = response.data.jobs.length;
+    if (pageSize < response.data.limit) break;
+    offset += pageSize;
+    if (offset >= response.data.total) break;
+  }
+  lastUpdatedAt = maxUpdated;
+  initialSyncDone = true;
+  return true;
+};
+
+const fetchUpdates = async () => {
+  const cursor =
+    getCursorTimestamp() ??
+    (initialSyncDone ? null : '1970-01-01T00:00:00.000Z');
+  let offset = 0;
+  let maxUpdated: string | null = lastUpdatedAt;
+  while (true) {
+    const response = await listJobs({
+      updatedAfter: cursor ?? undefined,
+      offset,
+      limit: jobPageSize
+    });
+    if (response.status !== 200 || !response.data) {
+      console.error('Failed to list jobs', response.status, response.data);
+      return false;
+    }
+    if (response.data.jobs.length === 0) break;
+    for (const job of response.data.jobs) {
+      updateTrackedJob(job);
+      maxUpdated = maxTimestamp(maxUpdated, job.updated_at);
+    }
+    const pageSize = response.data.jobs.length;
+    if (pageSize < response.data.limit) break;
+    offset += pageSize;
+    if (offset >= response.data.total) break;
+  }
+  if (maxUpdated) {
+    lastUpdatedAt = maxUpdated;
+  }
+  return true;
+};
+
+const getOrCreateDelivery = async (job: Job): Promise<DeliveryPayload> => {
+  const existing = pendingDeliveries.get(job.job_id);
+  if (existing) return existing;
+
+  let delivery: DeliveryPayload;
+  try {
+    const result = await Promise.resolve(executeJob(job.request_payload));
+    if (result === undefined) {
+      delivery = {
+        result_payload: null,
+        error: { message: 'Job execution returned no result' }
+      };
+    } else {
+      delivery = { result_payload: result, error: null };
+    }
+  } catch (error) {
+    delivery = {
+      result_payload: null,
+      error: { message: String(error) }
+    };
+  }
+  pendingDeliveries.set(job.job_id, delivery);
+  return delivery;
+};
+
+const deliverWithLock = async (job: Job) => {
+  const jobId = job.job_id;
+  if (lockLostJobs.has(jobId)) {
+    console.warn('Skipping delivery, lock lost', jobId);
+    return;
+  }
+  const delivery = await getOrCreateDelivery(job);
+  if (lockLostJobs.has(jobId)) {
+    console.warn('Skipping delivery after lock loss', jobId);
+    return;
+  }
+  const deliverRes = await deliverJob(jobId, delivery);
+  if (deliverRes.status === 200 && deliverRes.data?.job) {
+    pendingDeliveries.delete(jobId);
+    updateTrackedJob(deliverRes.data.job);
+    return;
+  }
+  if (deliverRes.status === 409) {
+    console.warn('Delivery rejected', jobId, deliverRes.data);
+    return;
+  }
+  console.error('Delivery failed', jobId, deliverRes.status, deliverRes.data);
+};
+
+const runJobWithLock = async (job: Job) => {
+  const jobId = job.job_id;
+  if (lockLostJobs.has(jobId)) return;
+  startLockHeartbeat(jobId);
+  try {
+    await deliverWithLock(job);
+  } finally {
+    stopLockHeartbeat(jobId);
+  }
+};
+
+const withJobGuard = async (jobId: string, action: () => Promise<void>) => {
+  if (inFlightJobs.has(jobId)) return;
+  inFlightJobs.add(jobId);
+  try {
+    await action();
+  } finally {
+    inFlightJobs.delete(jobId);
+  }
+};
+
+const handleRequestedJob = async (job: Job) =>
+  withJobGuard(job.job_id, async () => {
+    const quoteRes = await createQuote(job.job_id);
+    if (quoteRes.status === 200 || quoteRes.status === 409) {
+      clearJobState(job.job_id);
+      return;
+    }
+    console.error('Quote failed', job.job_id, quoteRes.status, quoteRes.data);
+  });
+
+const handleAcceptedJob = async (job: Job) =>
+  withJobGuard(job.job_id, async () => {
+    const verified = await verifyPayment(job);
+    if (!verified) return;
+    const lockRes = await lockJob(job.job_id);
+    if (lockRes.status !== 200 || !lockRes.data?.job) {
+      if (lockRes.status !== 409) {
+        console.error('Lock failed', job.job_id, lockRes.status, lockRes.data);
+      }
+      return;
+    }
+    const lockedJob = lockRes.data.job;
+    updateTrackedJob(lockedJob);
+    await runJobWithLock(lockedJob);
+  });
+
+const handleRunningJob = async (job: Job) =>
+  withJobGuard(job.job_id, async () => {
+    if (job.lock_owner && job.lock_owner !== sellerPubkey) {
+      return;
+    }
+    const lockRes = await lockJob(job.job_id);
+    if (lockRes.status !== 200 || !lockRes.data?.job) {
+      if (lockRes.status !== 409) {
+        console.error('Lock renewal failed', job.job_id, lockRes.status, lockRes.data);
+      }
+      return;
+    }
+    const lockedJob = lockRes.data.job;
+    updateTrackedJob(lockedJob);
+    await runJobWithLock(lockedJob);
+  });
+
+const processTrackedJobs = async () => {
+  const jobs = Array.from(trackedJobs.values());
+  for (const job of jobs) {
+    if (job.status === 'requested') {
+      await handleRequestedJob(job);
+      continue;
+    }
+    if (job.status === 'accepted') {
+      await handleAcceptedJob(job);
+      continue;
+    }
+    if (job.status === 'running') {
+      await handleRunningJob(job);
+      continue;
+    }
+    clearJobState(job.job_id);
+  }
+};
 
 const pollOnce = async () => {
   if (polling) return;
   polling = true;
   try {
-    const response = await listJobs(lastUpdatedAt);
-    if (response.status !== 200 || !response.data) {
-      console.error('Failed to list jobs', response.status, response.data);
-      return;
+    if (!initialSyncDone) {
+      await syncTrackedJobs();
     }
-    let newest = lastUpdatedAt;
-    for (const job of response.data.jobs) {
-      if (
-        job.updated_at &&
-        (!newest ||
-          new Date(job.updated_at).getTime() > new Date(newest).getTime())
-      ) {
-        newest = job.updated_at;
-      }
-      if (job.status === 'requested' && !quotedJobs.has(job.job_id)) {
-        const quoteRes = await createQuote(job.job_id);
-        if (quoteRes.status === 200) {
-          quotedJobs.add(job.job_id);
-        } else if (quoteRes.status === 409) {
-          quotedJobs.add(job.job_id);
-        } else {
-          console.error('Quote failed', quoteRes.status, quoteRes.data);
-        }
-      }
-
-      if (
-        job.status === 'accepted' &&
-        (await verifyPayment(job)) &&
-        !deliveredJobs.has(job.job_id)
-      ) {
-        const lockRes = await lockJob(job.job_id);
-        if (lockRes.status !== 200) {
-          if (lockRes.status !== 409) {
-            console.error('Lock failed', lockRes.status, lockRes.data);
-          }
-          continue;
-        }
-        const result = executeJob(job.request_payload);
-        const deliverRes = await deliverJob(job.job_id, result);
-        if (deliverRes.status === 200) {
-          deliveredJobs.add(job.job_id);
-        } else {
-          console.error('Delivery failed', deliverRes.status, deliverRes.data);
-        }
-      }
-    }
-    lastUpdatedAt = newest;
+    await fetchUpdates();
+    await processTrackedJobs();
   } catch (error) {
     console.error('Polling error', error);
   } finally {
@@ -260,12 +519,38 @@ const pollOnce = async () => {
 let pollTimer: NodeJS.Timeout | null = null;
 let wsReconnectTimer: NodeJS.Timeout | null = null;
 
+const scheduleNextPoll = () => {
+  if (pollTimer) return;
+  const jitter = pollJitterMs > 0 ? Math.floor(Math.random() * pollJitterMs) : 0;
+  pollTimer = setTimeout(() => {
+    pollTimer = null;
+    void pollOnce().finally(() => {
+      scheduleNextPoll();
+    });
+  }, pollIntervalMs + jitter);
+};
+
 const startPolling = () => {
   if (pollTimer) return;
-  pollTimer = setInterval(() => {
-    void pollOnce();
-  }, 2000);
+  scheduleNextPoll();
   void pollOnce();
+};
+
+const resetWsBackoff = () => {
+  wsReconnectAttempts = 0;
+};
+
+const scheduleWsReconnect = (reason: string) => {
+  if (wsReconnectTimer) return;
+  const attempt = Math.min(wsReconnectAttempts, 10);
+  const maxDelay = Math.min(wsBackoffMaxMs, wsBackoffBaseMs * 2 ** attempt);
+  const delayMs = Math.floor(Math.random() * maxDelay);
+  wsReconnectAttempts += 1;
+  console.log(`WS reconnecting in ${delayMs}ms (${reason})`);
+  wsReconnectTimer = setTimeout(() => {
+    wsReconnectTimer = null;
+    connectWebSocket();
+  }, delayMs);
 };
 
 const connectWebSocket = () => {
@@ -304,6 +589,7 @@ const connectWebSocket = () => {
 
     if (message.type === 'auth.ok') {
       console.log('WS authenticated');
+      resetWsBackoff();
       return;
     }
 
@@ -319,24 +605,13 @@ const connectWebSocket = () => {
   });
 
   ws.on('close', () => {
-    console.log('WS disconnected, reconnecting...');
-    if (!wsReconnectTimer) {
-      wsReconnectTimer = setTimeout(() => {
-        wsReconnectTimer = null;
-        connectWebSocket();
-      }, 1000);
-    }
+    scheduleWsReconnect('close');
   });
 
   ws.on('error', (error) => {
     console.error('WS error', error);
     ws.close();
-    if (!wsReconnectTimer) {
-      wsReconnectTimer = setTimeout(() => {
-        wsReconnectTimer = null;
-        connectWebSocket();
-      }, 1000);
-    }
+    scheduleWsReconnect('error');
   });
 };
 
